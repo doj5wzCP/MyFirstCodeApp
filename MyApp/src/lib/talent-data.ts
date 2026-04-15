@@ -46,12 +46,18 @@ export type DataverseDiagnostics = {
   lastUpdated: string
   connectionMode: DataConnectionStatus["mode"]
   connectionMessage: string
+  notesNavProp: string
+  notesCount: number
+  lastNotesFilter: string
 }
 
 let connectionStatus: DataConnectionStatus = { mode: "unknown", message: "Checking Dataverse connection" }
 let lastOperation = "none"
 let lastError = ""
 let lastBridgeSource = "none"
+let notesNavProp = "unknown"
+let notesCount = 0
+let lastNotesFilter = ""
 
 type XrmWebApi = {
   retrieveMultipleRecords: (entityLogicalName: string, options?: string) => Promise<{ entities: Row[] }>
@@ -292,6 +298,9 @@ export function getDataverseDiagnostics(): DataverseDiagnostics {
     runtimeHost,
     runtimeHref,
     configuredTables: [TALENT_TABLE, NOTES_TABLE],
+    notesNavProp,
+    notesCount,
+    lastNotesFilter,
     lastOperation,
     lastError,
     lastUpdated: nowIso(),
@@ -342,7 +351,12 @@ function mapNote(row: Row): CandidateNote {
     candidateId: str(row, "_doj5wz_employeetalentprofileid_value"),
     title: str(row, "doj5wz_notes1"),
     description: str(row, "doj5wz_notecontent"),
-    createdBy: str(row, "_createdby_value@OData.Community.Display.V1.FormattedValue", "createdby") || "Unknown",
+    createdBy: str(
+      row,
+      "_createdby_value@OData.Community.Display.V1.FormattedValue",
+      "createdby",
+      "_createdby_value"
+    ) || "System",
     createdOn: str(row, "createdon") || new Date().toISOString(),
   }
 }
@@ -496,9 +510,12 @@ export async function listNotes(candidateId: string, searchText = ""): Promise<C
     "doj5wz_notes1",
     "doj5wz_notecontent",
     "createdon",
+    "createdby",
     "_doj5wz_employeetalentprofileid_value",
+    "_createdby_value",
   ]
   const filter = `_doj5wz_employeetalentprofileid_value eq ${candidateId}`
+  lastNotesFilter = filter
 
   try {
     const rows = runtime === "bridge"
@@ -526,12 +543,51 @@ export async function listNotes(candidateId: string, searchText = ""): Promise<C
 
     setDataverseConnected(operation, runtime)
     const lowered = toLower(searchText)
-    return rows
+    const filteredNotes = rows
       .map(mapNote)
       .filter((n: CandidateNote) => !lowered || toLower(n.title).includes(lowered) || toLower(n.description).includes(lowered))
+    notesCount = rows.length
+    return filteredNotes
   } catch (error) {
+    notesCount = -1  // Indicate error
     const message = setErrorStatus(operation, error, "Failed to load notes")
     throw new Error(message)
+  }
+}
+
+// Queries the live Dataverse OData metadata to find the single-valued navigation
+// property name for the notes → candidate lookup. Must match exactly what appears
+// in EntityDefinitions/ManyToOneRelationships/ReferencingEntityNavigationPropertyName.
+async function probeNotesNavProp(): Promise<string> {
+  try {
+    const client = getClient(dataSourcesInfo)
+    const result = await runBridgeWithKeyFallback(NOTES_BRIDGE_KEYS, async (tableName) => {
+      const r = await client.executeAsync<unknown, Record<string, unknown>>({
+        dataverseRequest: {
+          action: "getEntityMetadata",
+          parameters: {
+            tableName,
+            options: {
+              metadata: ["LogicalName"],
+              schema: { manyToOne: true },
+            },
+          },
+        },
+      })
+      if (!r.success) throw r.error ?? new Error("metadata probe failed")
+      return r.data
+    })
+
+    type Rel = Record<string, string>
+    const rels = (result as Record<string, unknown>).ManyToOneRelationships as Rel[] | undefined
+    if (!rels || rels.length === 0) return "no-relationships-found"
+
+    const rel = rels.find(
+      (r) => (r.ReferencingAttribute ?? "").toLowerCase() === "doj5wz_employeetalentprofileid"
+    )
+    return rel?.ReferencingEntityNavigationPropertyName ?? `not-found:${rels.map((r) => r.ReferencingEntityNavigationPropertyName).join(",")}`
+  } catch (e) {
+    return `error:${formatOperationError(e, "probe failed")}`
   }
 }
 
@@ -542,50 +598,36 @@ export async function createNote(candidateId: string, title: string, description
   const trimmedDescription = description.trim()
   if (!trimmedTitle || !trimmedDescription) throw new Error("Title and description are required")
 
-  const basePayload: Row = {
-    doj5wz_notes1: trimmedTitle,
-    doj5wz_notecontent: trimmedDescription,
+  // Probe the live OData metadata to find the correct navigation property name.
+  // Store in module-level variable so it is reused on subsequent calls.
+  if (notesNavProp === "unknown") {
+    notesNavProp = await probeNotesNavProp()
   }
 
-  const lookupBindingCandidates: Row[] = [
-    {
-      ...basePayload,
-      "doj5wz_employeetalentprofileid@odata.bind": `/${TALENT_ENTITY_SET}(${candidateId})`,
-    },
-    {
-      ...basePayload,
-      "doj5wz_EmployeeTalentProfileId@odata.bind": `/${TALENT_ENTITY_SET}(${candidateId})`,
-    },
-    {
-      ...basePayload,
-      doj5wz_employeetalentprofileid: candidateId,
-    },
-  ]
+  // Build the payload with the correct @odata.bind key sourced from live metadata.
+  // Use the probed nav property if successful, otherwise fall back to the lookup attribute name.
+  const isValidNavProp = notesNavProp && !notesNavProp.startsWith("error") && !notesNavProp.startsWith("not-found") && notesNavProp !== "unknown"
+  const bindKey = isValidNavProp
+    ? `${notesNavProp}@odata.bind`
+    : "doj5wz_employeetalentprofileid@odata.bind"
+
+  const payload: Row = {
+    doj5wz_notes1: trimmedTitle,
+    doj5wz_notecontent: trimmedDescription,
+    [bindKey]: `/${TALENT_ENTITY_SET}(${candidateId})`,
+  }
 
   try {
     if (runtime === "bridge") {
       const client = getClient(dataSourcesInfo)
-      let created = false
-      let lastCreateError: unknown = null
-
-      for (const payload of lookupBindingCandidates) {
-        try {
-          await runBridgeWithKeyFallback(NOTES_BRIDGE_KEYS, async (tableName) => {
-            const result = await client.createRecordAsync<Row, Row>(tableName, payload)
-            if (!result.success) throw result.error ?? new Error("Failed to create note")
-          })
-          created = true
-          break
-        } catch (error) {
-          lastCreateError = error
-        }
-      }
-
-      if (!created) throw lastCreateError ?? new Error("Failed to create note")
+      await runBridgeWithKeyFallback(NOTES_BRIDGE_KEYS, async (tableName) => {
+        const result = await client.createRecordAsync<Row, Row>(tableName, payload)
+        if (!result.success) throw result.error ?? new Error("Failed to create note")
+      })
     } else {
       const webApi = getXrmWebApi()
       if (!webApi) throw new Error("Xrm.WebApi became unavailable")
-      await webApi.createRecord(NOTES_TABLE, lookupBindingCandidates[0])
+      await webApi.createRecord(NOTES_TABLE, payload)
     }
 
     setDataverseConnected(operation, runtime)

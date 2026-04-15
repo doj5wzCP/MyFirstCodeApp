@@ -10,7 +10,7 @@ import type { CandidateProfile } from "@/lib/talent-types"
 import { getDataConnectionStatus, getDataverseDiagnostics, listCandidates } from "@/lib/talent-data"
 import { toast } from "sonner"
 
-const BUILD_STAMP = "2026-04-15.13"
+const BUILD_STAMP = "2026-04-16.20"
 
 export default function HomePage() {
   const navigate = useNavigate()
@@ -121,6 +121,9 @@ export default function HomePage() {
               <div>connectionMessage: {diagnostics.connectionMessage || "(empty)"}</div>
               <div>lastError: {diagnostics.lastError || "(none)"}</div>
               <div>configuredTables: {diagnostics.configuredTables.join(", ")}</div>
+              <div>notesNavProp: {diagnostics.notesNavProp}</div>
+              <div>notesCount: {diagnostics.notesCount}</div>
+              <div>lastNotesFilter: {diagnostics.lastNotesFilter || "(none)"}</div>
               <div>lastUpdated: {diagnostics.lastUpdated}</div>
             </div>
           </CardContent>
