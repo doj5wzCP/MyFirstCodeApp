@@ -1,0 +1,41 @@
+export type CandidateProfile = {
+  id: string
+  firstName: string
+  lastName: string
+  globalId: string
+  country: string
+  legalEntity: string
+  organizationalUnit: string
+  careerPath: string
+  developmentPool: string
+  promotionCandidate: boolean
+}
+
+export type CandidateNote = {
+  id: string
+  candidateId: string
+  title: string
+  description: string
+  createdBy: string
+  createdOn: string
+}
+
+export type CandidateFilters = {
+  country: string
+  legalEntity: string
+  organizationalUnit: string
+  careerPath: string
+  developmentPool: string
+  onlyPromotionCandidates: boolean
+  searchText: string
+}
+
+export const emptyFilters: CandidateFilters = {
+  country: "",
+  legalEntity: "",
+  organizationalUnit: "",
+  careerPath: "",
+  developmentPool: "",
+  onlyPromotionCandidates: false,
+  searchText: "",
+}

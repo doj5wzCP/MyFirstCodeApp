@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "appId": "5aa18d3e-a84c-46cd-bff3-6ff90fee2a8c",
+  "appDisplayName": "TestCodeApp",
+  "description": null,
+  "environmentId": "1390c191-10fb-e1e5-a183-08e9d001324e",
+  "buildPath": "./dist",
+  "buildEntryPoint": "index.html",
+  "logoPath": "Default",
+  "localAppUrl": "http://localhost:3000/",
+  "connectionReferences": {
+    "f0a83f95-4b06-4fe3-8a9b-0e3638438ea4": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+      "displayName": "Microsoft Dataverse",
+      "dataSources": [
+        "EmployeeTalentProfile",
+        "Notes"
+      ],
+      "sharedConnectionId": "b97ec043-0665-422e-9537-3bec309ab8a3",
+      "xrmConnectionReferenceLogicalName": "shared_commondataserviceforapps_1"
+    }
+  },
+  "databaseReferences": {
+    "default.cds": {
+      "dataSources": {
+        "EmployeeTalentProfile": {
+          "entitySetName": "doj5wz_employeetalentprofiles",
+          "logicalName": "doj5wz_employeetalentprofile",
+          "isHidden": false
+        },
+        "Notes": {
+          "entitySetName": "doj5wz_noteses",
+          "logicalName": "doj5wz_notes",
+          "isHidden": false
+        }
+      },
+      "environmentVariableName": ""
+    }
+  }
+}
