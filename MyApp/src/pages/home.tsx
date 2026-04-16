@@ -10,7 +10,7 @@ import type { CandidateProfile } from "@/lib/talent-types"
 import { getDataConnectionStatus, getDataverseDiagnostics, listCandidates } from "@/lib/talent-data"
 import { toast } from "sonner"
 
-const BUILD_STAMP = "2026-04-16.20"
+const BUILD_STAMP = "2026-04-16.24"
 
 export default function HomePage() {
   const navigate = useNavigate()
@@ -19,13 +19,18 @@ export default function HomePage() {
   const [filters, setFilters] = useState(emptyFilters)
   const [connectionStatus, setConnectionStatus] = useState(getDataConnectionStatus())
   const [diagnostics, setDiagnostics] = useState(getDataverseDiagnostics())
+  const [showDiagnostics, setShowDiagnostics] = useState(false)
 
-  async function loadData() {
+  async function loadData(options?: { showToast?: boolean; showDiagnostics?: boolean }) {
+    const showToast = options?.showToast ?? false
+    const showDiagnostics = options?.showDiagnostics ?? false
     try {
       setLoading(true)
       const data = await listCandidates(filters)
       setCandidates(data)
       setConnectionStatus(getDataConnectionStatus())
+      if (showDiagnostics) setShowDiagnostics(true)
+      if (showToast) toast.success(`Data refreshed (${data.length} candidates loaded)`)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to load candidate data"
       setConnectionStatus(getDataConnectionStatus())
@@ -100,34 +105,36 @@ export default function HomePage() {
             <Button variant="outline" onClick={() => navigate("/excel-upload")}>
               Upload Excel
             </Button>
-            <Button onClick={() => void loadData()}>Refresh Data</Button>
+            <Button onClick={() => void loadData({ showToast: true, showDiagnostics: true })}>Refresh Data</Button>
           </div>
         </div>
 
-        <Card className="border shadow-none">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Dataverse Diagnostics</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed">
-              <div>build: {BUILD_STAMP}</div>
-              <div>bridgeAvailable: {diagnostics.bridgeAvailable ? "yes" : "no"}</div>
-              <div>bridgeSource: {diagnostics.bridgeSource || "none"}</div>
-              <div>xrmAvailable: {diagnostics.xrmAvailable ? "yes" : "no"}</div>
-              <div>runtimeHost: {diagnostics.runtimeHost || "(unknown)"}</div>
-              <div>runtimeHref: {diagnostics.runtimeHref || "(unknown)"}</div>
-              <div>connectionMode: {diagnostics.connectionMode}</div>
-              <div>lastOperation: {diagnostics.lastOperation}</div>
-              <div>connectionMessage: {diagnostics.connectionMessage || "(empty)"}</div>
-              <div>lastError: {diagnostics.lastError || "(none)"}</div>
-              <div>configuredTables: {diagnostics.configuredTables.join(", ")}</div>
-              <div>notesNavProp: {diagnostics.notesNavProp}</div>
-              <div>notesCount: {diagnostics.notesCount}</div>
-              <div>lastNotesFilter: {diagnostics.lastNotesFilter || "(none)"}</div>
-              <div>lastUpdated: {diagnostics.lastUpdated}</div>
-            </div>
-          </CardContent>
-        </Card>
+        {showDiagnostics && (
+          <Card className="border shadow-none">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Dataverse Diagnostics</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed">
+                <div>build: {BUILD_STAMP}</div>
+                <div>bridgeAvailable: {diagnostics.bridgeAvailable ? "yes" : "no"}</div>
+                <div>bridgeSource: {diagnostics.bridgeSource || "none"}</div>
+                <div>xrmAvailable: {diagnostics.xrmAvailable ? "yes" : "no"}</div>
+                <div>runtimeHost: {diagnostics.runtimeHost || "(unknown)"}</div>
+                <div>runtimeHref: {diagnostics.runtimeHref || "(unknown)"}</div>
+                <div>connectionMode: {diagnostics.connectionMode}</div>
+                <div>lastOperation: {diagnostics.lastOperation}</div>
+                <div>connectionMessage: {diagnostics.connectionMessage || "(empty)"}</div>
+                <div>lastError: {diagnostics.lastError || "(none)"}</div>
+                <div>configuredTables: {diagnostics.configuredTables.join(", ")}</div>
+                <div>notesNavProp: {diagnostics.notesNavProp}</div>
+                <div>notesCount: {diagnostics.notesCount}</div>
+                <div>lastNotesFilter: {diagnostics.lastNotesFilter || "(none)"}</div>
+                <div>lastUpdated: {diagnostics.lastUpdated}</div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="border shadow-none">
           <CardHeader className="pb-3">

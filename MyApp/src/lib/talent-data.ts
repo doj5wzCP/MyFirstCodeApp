@@ -637,3 +637,155 @@ export async function createNote(candidateId: string, title: string, description
   }
 }
 
+// --- Bulk Import Types and Functions ---
+
+export type ImportReview = {
+  newRecords: CandidateProfile[]
+  changedRecords: Array<{ existing: CandidateProfile; uploaded: Partial<CandidateProfile> }>
+  skippedRecords: CandidateProfile[]
+}
+
+export async function analyzeUploadData(
+  uploadedCandidates: Partial<CandidateProfile>[]
+): Promise<ImportReview> {
+  const operation = "analyzeUploadData"
+
+  try {
+    // Load all existing candidates
+    const existingCandidates = await listCandidates()
+
+    const newRecords: CandidateProfile[] = []
+    const changedRecords: ImportReview["changedRecords"] = []
+    const skippedRecords: CandidateProfile[] = []
+
+    for (const uploaded of uploadedCandidates) {
+      // Try to find existing by globalId
+      const existing = existingCandidates.find((c) => c.globalId && c.globalId === uploaded.globalId)
+
+      if (!existing) {
+        // Map to full CandidateProfile with defaults
+        const newCand: CandidateProfile = {
+          id: "", // Will be assigned by Dataverse
+          firstName: uploaded.firstName || "",
+          lastName: uploaded.lastName || "",
+          globalId: uploaded.globalId || "",
+          country: uploaded.country || "",
+          legalEntity: uploaded.legalEntity || "",
+          organizationalUnit: uploaded.organizationalUnit || "",
+          careerPath: uploaded.careerPath || "",
+          developmentPool: uploaded.developmentPool || "",
+          promotionCandidate: uploaded.promotionCandidate ?? false,
+        }
+        newRecords.push(newCand)
+      } else {
+        // Check if any fields are different
+        const isDifferent =
+          (uploaded.firstName && uploaded.firstName !== existing.firstName) ||
+          (uploaded.lastName && uploaded.lastName !== existing.lastName) ||
+          (uploaded.country && uploaded.country !== existing.country) ||
+          (uploaded.legalEntity && uploaded.legalEntity !== existing.legalEntity) ||
+          (uploaded.organizationalUnit && uploaded.organizationalUnit !== existing.organizationalUnit) ||
+          (uploaded.careerPath && uploaded.careerPath !== existing.careerPath) ||
+          (uploaded.developmentPool && uploaded.developmentPool !== existing.developmentPool) ||
+          (uploaded.promotionCandidate !== undefined && uploaded.promotionCandidate !== existing.promotionCandidate)
+
+        if (isDifferent) {
+          changedRecords.push({ existing, uploaded })
+        } else {
+          skippedRecords.push(existing)
+        }
+      }
+    }
+
+    setDataverseConnected(operation)
+    return { newRecords, changedRecords, skippedRecords }
+  } catch (error) {
+    const message = setErrorStatus(operation, error, "Failed to analyze upload data")
+    throw new Error(message)
+  }
+}
+
+export async function executeBulkImport(
+  newRecords: CandidateProfile[],
+  updatedRecords: Array<{ id: string; updates: Partial<CandidateProfile> }>
+): Promise<{ created: number; updated: number; errors: string[] }> {
+  const operation = "executeBulkImport"
+  const errors: string[] = []
+
+  try {
+    const runtime = await resolveRuntime(operation)
+    let createdCount = 0
+    let updatedCount = 0
+
+    // Create new records
+    for (const candidate of newRecords) {
+      try {
+        const payload: Row = {
+          doj5wz_firstname: candidate.firstName,
+          doj5wz_lastname: candidate.lastName,
+          doj5wz_globalidentifier: candidate.globalId,
+          doj5wz_country: candidate.country,
+          doj5wz_legalentity: candidate.legalEntity,
+          doj5wz_organizationalunit: candidate.organizationalUnit,
+          doj5wz_careerpath: candidate.careerPath,
+          doj5wz_developmentpool: candidate.developmentPool,
+          doj5wz_selfnomination: candidate.promotionCandidate,
+        }
+
+        if (runtime === "bridge") {
+          const client = getClient(dataSourcesInfo)
+          await runBridgeWithKeyFallback(TALENT_BRIDGE_KEYS, async (tableName) => {
+            const result = await client.createRecordAsync<Row, Row>(tableName, payload)
+            if (!result.success) throw result.error ?? new Error("Failed to create record")
+          })
+        } else {
+          const webApi = getXrmWebApi()
+          if (!webApi) throw new Error("Xrm.WebApi became unavailable")
+          await webApi.createRecord(TALENT_TABLE, payload)
+        }
+        createdCount++
+      } catch (error) {
+        errors.push(
+          `Failed to create ${candidate.firstName} ${candidate.lastName}: ${error instanceof Error ? error.message : "Unknown error"}`
+        )
+      }
+    }
+
+    // Update existing records
+    for (const { id, updates } of updatedRecords) {
+      try {
+        const payload: Row = {}
+        if (updates.firstName) payload.doj5wz_firstname = updates.firstName
+        if (updates.lastName) payload.doj5wz_lastname = updates.lastName
+        if (updates.country) payload.doj5wz_country = updates.country
+        if (updates.legalEntity) payload.doj5wz_legalentity = updates.legalEntity
+        if (updates.organizationalUnit) payload.doj5wz_organizationalunit = updates.organizationalUnit
+        if (updates.developmentPool) payload.doj5wz_developmentpool = updates.developmentPool
+        if (updates.promotionCandidate !== undefined) payload.doj5wz_selfnomination = updates.promotionCandidate
+
+        if (runtime === "bridge") {
+          const client = getClient(dataSourcesInfo)
+          await runBridgeWithKeyFallback(TALENT_BRIDGE_KEYS, async (tableName) => {
+            const result = await client.updateRecordAsync<Row, Row>(tableName, id, payload)
+            if (!result.success) throw result.error ?? new Error("Failed to update record")
+          })
+        } else {
+          const webApi = getXrmWebApi()
+          if (!webApi) throw new Error("Xrm.WebApi became unavailable")
+          await webApi.updateRecord(TALENT_TABLE, id, payload)
+        }
+        updatedCount++
+      } catch (error) {
+        errors.push(`Failed to update record ${id}: ${error instanceof Error ? error.message : "Unknown error"}`)
+      }
+    }
+
+    setDataverseConnected(operation)
+    return { created: createdCount, updated: updatedCount, errors }
+  } catch (error) {
+    const message = setErrorStatus(operation, error, "Bulk import failed")
+    throw new Error(message)
+  }
+}
+
+
