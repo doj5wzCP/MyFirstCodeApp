@@ -3,6 +3,14 @@ import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { emptyFilters } from "@/lib/talent-types"
@@ -12,6 +20,39 @@ import { toast } from "sonner"
 
 const BUILD_STAMP = "2026-04-16.24"
 
+type CandidateOverviewField =
+  | "firstName"
+  | "lastName"
+  | "globalId"
+  | "country"
+  | "legalEntity"
+  | "organizationalUnit"
+  | "careerPath"
+  | "functionalArea"
+  | "developmentPool"
+  | "promotionCandidate"
+
+const DEFAULT_VISIBLE_FIELDS: CandidateOverviewField[] = [
+  "firstName",
+  "lastName",
+  "globalId",
+  "country",
+  "careerPath",
+]
+
+const FIELD_DEFINITIONS: Array<{ key: CandidateOverviewField; label: string; width: string }> = [
+  { key: "firstName", label: "First Name", width: "1fr" },
+  { key: "lastName", label: "Last Name", width: "1fr" },
+  { key: "globalId", label: "Global ID", width: "0.95fr" },
+  { key: "country", label: "Country", width: "0.9fr" },
+  { key: "legalEntity", label: "Legal Entity", width: "1.1fr" },
+  { key: "organizationalUnit", label: "Organizational Unit", width: "1.2fr" },
+  { key: "careerPath", label: "Career Path", width: "1fr" },
+  { key: "functionalArea", label: "Potential Area", width: "1.1fr" },
+  { key: "developmentPool", label: "Readiness Level", width: "1.1fr" },
+  { key: "promotionCandidate", label: "Promotion Candidate", width: "1fr" },
+]
+
 export default function HomePage() {
   const navigate = useNavigate()
   const [candidates, setCandidates] = useState<CandidateProfile[]>([])
@@ -20,6 +61,7 @@ export default function HomePage() {
   const [connectionStatus, setConnectionStatus] = useState(getDataConnectionStatus())
   const [diagnostics, setDiagnostics] = useState(getDataverseDiagnostics())
   const [showDiagnostics, setShowDiagnostics] = useState(false)
+  const [visibleFields, setVisibleFields] = useState<CandidateOverviewField[]>(DEFAULT_VISIBLE_FIELDS)
 
   async function loadData(options?: { showToast?: boolean; showDiagnostics?: boolean }) {
     const showToast = options?.showToast ?? false
@@ -83,6 +125,40 @@ export default function HomePage() {
         {item}
       </option>
     ))
+  }
+
+  const selectedFieldDefinitions = FIELD_DEFINITIONS.filter((field) => visibleFields.includes(field.key))
+  const columnTemplate = `${selectedFieldDefinitions.map((field) => field.width).join(" ")} auto`
+
+  function toggleVisibleField(field: CandidateOverviewField, checked: boolean) {
+    setVisibleFields((prev) => {
+      if (checked) {
+        if (prev.includes(field)) return prev
+        return [...prev, field]
+      }
+
+      const next = prev.filter((item) => item !== field)
+      if (next.length === 0) {
+        toast.error("At least one field must remain selected")
+        return prev
+      }
+
+      return next
+    })
+  }
+
+  function renderCandidateCell(candidate: CandidateProfile, field: CandidateOverviewField) {
+    if (field === "firstName") return candidate.firstName
+    if (field === "lastName") return candidate.lastName
+    if (field === "globalId") return <span className="font-medium">{candidate.globalId}</span>
+    if (field === "country") return candidate.country
+    if (field === "legalEntity") return candidate.legalEntity
+    if (field === "organizationalUnit") return candidate.organizationalUnit
+    if (field === "careerPath") return candidate.careerPath
+    if (field === "functionalArea") return candidate.functionalArea
+    if (field === "developmentPool") return candidate.developmentPool
+    if (field === "promotionCandidate") return candidate.promotionCandidate ? "Yes" : "No"
+    return "-"
   }
 
   return (
@@ -227,15 +303,36 @@ export default function HomePage() {
 
         <Card className="border shadow-none flex-1 min-h-0">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Candidates</CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-base">Candidates</CardTitle>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">Select Fields</Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>Visible fields</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {FIELD_DEFINITIONS.map((field) => (
+                    <DropdownMenuCheckboxItem
+                      key={field.key}
+                      checked={visibleFields.includes(field.key)}
+                      onCheckedChange={(checked) => toggleVisibleField(field.key, checked === true)}
+                    >
+                      {field.label}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </CardHeader>
           <CardContent className="overflow-auto">
-            <div className="grid min-w-[780px] grid-cols-[1.1fr_1.1fr_0.9fr_1fr_1fr_auto] gap-3 border-b pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <div>First Name</div>
-              <div>Last Name</div>
-              <div>Global ID</div>
-              <div>Country / Org Unit</div>
-              <div>Career / Development</div>
+            <div
+              className="grid min-w-[780px] gap-3 border-b pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              style={{ gridTemplateColumns: columnTemplate }}
+            >
+              {selectedFieldDefinitions.map((field) => (
+                <div key={field.key}>{field.label}</div>
+              ))}
               <div className="text-right">Action</div>
             </div>
 
@@ -249,13 +346,12 @@ export default function HomePage() {
                   key={candidate.id}
                   type="button"
                   onClick={() => navigate(`/candidate/${candidate.id}`)}
-                  className="grid w-full min-w-[780px] grid-cols-[1.1fr_1.1fr_0.9fr_1fr_1fr_auto] gap-3 border-b py-3 text-left text-sm hover:bg-muted/40"
+                  className="grid w-full min-w-[780px] gap-3 border-b py-3 text-left text-sm hover:bg-muted/40"
+                  style={{ gridTemplateColumns: columnTemplate }}
                 >
-                  <div>{candidate.firstName}</div>
-                  <div>{candidate.lastName}</div>
-                  <div className="font-medium">{candidate.globalId}</div>
-                  <div>{candidate.country || candidate.organizationalUnit}</div>
-                  <div>{candidate.careerPath || candidate.developmentPool}</div>
+                  {selectedFieldDefinitions.map((field) => (
+                    <div key={field.key}>{renderCandidateCell(candidate, field.key)}</div>
+                  ))}
                   <div className="text-right">
                     <span className="candidate-open-chip">Open</span>
                   </div>
