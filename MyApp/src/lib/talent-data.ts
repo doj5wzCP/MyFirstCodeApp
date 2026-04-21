@@ -364,14 +364,18 @@ function mapNote(row: Row): CandidateNote {
 
 function toLower(v: string) { return v.trim().toLowerCase() }
 
+function matchesAny(selectedValues: string[], candidateValue: string): boolean {
+  return selectedValues.length === 0 || selectedValues.includes(candidateValue)
+}
+
 function applyFilters(items: CandidateProfile[], filters: CandidateFilters): CandidateProfile[] {
   return items.filter((c) => {
-    if (filters.country && c.country !== filters.country) return false
-    if (filters.legalEntity && c.legalEntity !== filters.legalEntity) return false
-    if (filters.organizationalUnit && c.organizationalUnit !== filters.organizationalUnit) return false
-    if (filters.careerPath && c.careerPath !== filters.careerPath) return false
-    if (filters.functionalArea && c.functionalArea !== filters.functionalArea) return false
-    if (filters.developmentPool && c.developmentPool !== filters.developmentPool) return false
+    if (!matchesAny(filters.country, c.country)) return false
+    if (!matchesAny(filters.legalEntity, c.legalEntity)) return false
+    if (!matchesAny(filters.organizationalUnit, c.organizationalUnit)) return false
+    if (!matchesAny(filters.careerPath, c.careerPath)) return false
+    if (!matchesAny(filters.functionalArea, c.functionalArea)) return false
+    if (!matchesAny(filters.developmentPool, c.developmentPool)) return false
     if (filters.onlyPromotionCandidates && !c.promotionCandidate) return false
     if (filters.searchText) {
       const q = toLower(filters.searchText)

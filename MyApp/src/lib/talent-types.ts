@@ -22,23 +22,23 @@ export type CandidateNote = {
 }
 
 export type CandidateFilters = {
-  country: string
-  legalEntity: string
-  organizationalUnit: string
-  careerPath: string
-  functionalArea: string
-  developmentPool: string
+  country: string[]
+  legalEntity: string[]
+  organizationalUnit: string[]
+  careerPath: string[]
+  functionalArea: string[]
+  developmentPool: string[]
   onlyPromotionCandidates: boolean
   searchText: string
 }
 
 export const emptyFilters: CandidateFilters = {
-  country: "",
-  legalEntity: "",
-  organizationalUnit: "",
-  careerPath: "",
-  functionalArea: "",
-  developmentPool: "",
+  country: [],
+  legalEntity: [],
+  organizationalUnit: [],
+  careerPath: [],
+  functionalArea: [],
+  developmentPool: [],
   onlyPromotionCandidates: false,
   searchText: "",
 }

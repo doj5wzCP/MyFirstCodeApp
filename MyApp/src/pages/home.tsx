@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { emptyFilters } from "@/lib/talent-types"
-import type { CandidateProfile } from "@/lib/talent-types"
+import type { CandidateFilters, CandidateProfile } from "@/lib/talent-types"
 import { getDataConnectionStatus, getDataverseDiagnostics, listCandidates } from "@/lib/talent-data"
 import { toast } from "sonner"
 
@@ -53,9 +53,77 @@ const FIELD_DEFINITIONS: Array<{ key: CandidateOverviewField; label: string; wid
   { key: "promotionCandidate", label: "Promotion Candidate", width: "1fr" },
 ]
 
+type MultiValueFilterKey =
+  | "country"
+  | "legalEntity"
+  | "organizationalUnit"
+  | "careerPath"
+  | "functionalArea"
+  | "developmentPool"
+
+function MultiValueFilter({
+  label,
+  options,
+  selectedValues,
+  onSelectionChange,
+}: {
+  label: string
+  options: string[]
+  selectedValues: string[]
+  onSelectionChange: (next: string[]) => void
+}) {
+  const summary =
+    selectedValues.length === 0
+      ? `${label} (All)`
+      : selectedValues.length === 1
+        ? selectedValues[0]
+        : `${label}: ${selectedValues.length} selected`
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" className="h-9 w-full justify-between px-3 text-sm font-normal">
+          <span className="truncate text-left">{summary}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-72 w-[--radix-dropdown-menu-trigger-width] overflow-auto">
+        <DropdownMenuLabel>{label}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuCheckboxItem
+          checked={selectedValues.length === 0}
+          onCheckedChange={(checked) => {
+            if (checked) onSelectionChange([])
+          }}
+          onSelect={(event) => event.preventDefault()}
+        >
+          All
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
+        {options.map((option) => (
+          <DropdownMenuCheckboxItem
+            key={option}
+            checked={selectedValues.includes(option)}
+            onCheckedChange={(checked) => {
+              if (checked) {
+                if (selectedValues.includes(option)) return
+                onSelectionChange([...selectedValues, option])
+                return
+              }
+              onSelectionChange(selectedValues.filter((value) => value !== option))
+            }}
+            onSelect={(event) => event.preventDefault()}
+          >
+            {option}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 export default function HomePage() {
   const navigate = useNavigate()
-  const [candidates, setCandidates] = useState<CandidateProfile[]>([])
+  const [allCandidates, setAllCandidates] = useState<CandidateProfile[]>([])
   const [loading, setLoading] = useState(true)
   const [filters, setFilters] = useState(emptyFilters)
   const [connectionStatus, setConnectionStatus] = useState(getDataConnectionStatus())
@@ -68,8 +136,8 @@ export default function HomePage() {
     const showDiagnostics = options?.showDiagnostics ?? false
     try {
       setLoading(true)
-      const data = await listCandidates(filters)
-      setCandidates(data)
+      const data = await listCandidates(emptyFilters)
+      setAllCandidates(data)
       setConnectionStatus(getDataConnectionStatus())
       if (showDiagnostics) setShowDiagnostics(true)
       if (showToast) toast.success(`Data refreshed (${data.length} candidates loaded)`)
@@ -85,8 +153,53 @@ export default function HomePage() {
 
   useEffect(() => {
     void loadData()
-    // This view intentionally refreshes when a filter changes.
+  }, [])
+
+  const countries = useMemo(() => [...new Set(allCandidates.map((item) => item.country).filter(Boolean))], [allCandidates])
+  const legalEntities = useMemo(
+    () => [...new Set(allCandidates.map((item) => item.legalEntity).filter(Boolean))],
+    [allCandidates]
+  )
+  const organizationalUnits = useMemo(
+    () => [...new Set(allCandidates.map((item) => item.organizationalUnit).filter(Boolean))],
+    [allCandidates]
+  )
+  const careerPaths = useMemo(
+    () => [...new Set(allCandidates.map((item) => item.careerPath).filter(Boolean))],
+    [allCandidates]
+  )
+  const functionalAreas = useMemo(
+    () => [...new Set(allCandidates.map((item) => item.functionalArea).filter(Boolean))],
+    [allCandidates]
+  )
+  const developmentPools = useMemo(
+    () => [...new Set(allCandidates.map((item) => item.developmentPool).filter(Boolean))],
+    [allCandidates]
+  )
+
+  const candidates = useMemo(() => {
+    return allCandidates.filter((candidate) => {
+      if (filters.country.length > 0 && !filters.country.includes(candidate.country)) return false
+      if (filters.legalEntity.length > 0 && !filters.legalEntity.includes(candidate.legalEntity)) return false
+      if (filters.organizationalUnit.length > 0 && !filters.organizationalUnit.includes(candidate.organizationalUnit)) {
+        return false
+      }
+      if (filters.careerPath.length > 0 && !filters.careerPath.includes(candidate.careerPath)) return false
+      if (filters.functionalArea.length > 0 && !filters.functionalArea.includes(candidate.functionalArea)) return false
+      if (filters.developmentPool.length > 0 && !filters.developmentPool.includes(candidate.developmentPool)) return false
+      if (filters.onlyPromotionCandidates && !candidate.promotionCandidate) return false
+      if (filters.searchText) {
+        const q = filters.searchText.trim().toLowerCase()
+        const matchesSearch =
+          candidate.firstName.trim().toLowerCase().includes(q) ||
+          candidate.lastName.trim().toLowerCase().includes(q) ||
+          candidate.globalId.trim().toLowerCase().includes(q)
+        if (!matchesSearch) return false
+      }
+      return true
+    })
   }, [
+    allCandidates,
     filters.country,
     filters.legalEntity,
     filters.organizationalUnit,
@@ -97,34 +210,8 @@ export default function HomePage() {
     filters.searchText,
   ])
 
-  const countries = useMemo(() => [...new Set(candidates.map((item) => item.country).filter(Boolean))], [candidates])
-  const legalEntities = useMemo(
-    () => [...new Set(candidates.map((item) => item.legalEntity).filter(Boolean))],
-    [candidates]
-  )
-  const organizationalUnits = useMemo(
-    () => [...new Set(candidates.map((item) => item.organizationalUnit).filter(Boolean))],
-    [candidates]
-  )
-  const careerPaths = useMemo(
-    () => [...new Set(candidates.map((item) => item.careerPath).filter(Boolean))],
-    [candidates]
-  )
-  const functionalAreas = useMemo(
-    () => [...new Set(candidates.map((item) => item.functionalArea).filter(Boolean))],
-    [candidates]
-  )
-  const developmentPools = useMemo(
-    () => [...new Set(candidates.map((item) => item.developmentPool).filter(Boolean))],
-    [candidates]
-  )
-
-  function optionList(items: string[]) {
-    return items.map((item) => (
-      <option key={item} value={item}>
-        {item}
-      </option>
-    ))
+  function setMultiFilter(field: MultiValueFilterKey, nextValues: string[]) {
+    setFilters((prev: CandidateFilters) => ({ ...prev, [field]: nextValues }))
   }
 
   const selectedFieldDefinitions = FIELD_DEFINITIONS.filter((field) => visibleFields.includes(field.key))
@@ -222,60 +309,48 @@ export default function HomePage() {
             <CardTitle className="text-base">Filters</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-6">
-              <select
-                className="h-9 rounded-md border bg-background px-3 text-sm"
-                value={filters.country}
-                onChange={(event) => setFilters((prev) => ({ ...prev, country: event.target.value }))}
-              >
-                <option value="">Country (All)</option>
-                {optionList(countries)}
-              </select>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              <MultiValueFilter
+                label="Country"
+                options={countries}
+                selectedValues={filters.country}
+                onSelectionChange={(next) => setMultiFilter("country", next)}
+              />
 
-              <select
-                className="h-9 rounded-md border bg-background px-3 text-sm"
-                value={filters.legalEntity}
-                onChange={(event) => setFilters((prev) => ({ ...prev, legalEntity: event.target.value }))}
-              >
-                <option value="">Legal Entity (All)</option>
-                {optionList(legalEntities)}
-              </select>
+              <MultiValueFilter
+                label="Legal Entity"
+                options={legalEntities}
+                selectedValues={filters.legalEntity}
+                onSelectionChange={(next) => setMultiFilter("legalEntity", next)}
+              />
 
-              <select
-                className="h-9 rounded-md border bg-background px-3 text-sm"
-                value={filters.organizationalUnit}
-                onChange={(event) => setFilters((prev) => ({ ...prev, organizationalUnit: event.target.value }))}
-              >
-                <option value="">Organizational Unit (All)</option>
-                {optionList(organizationalUnits)}
-              </select>
+              <MultiValueFilter
+                label="Organizational Unit"
+                options={organizationalUnits}
+                selectedValues={filters.organizationalUnit}
+                onSelectionChange={(next) => setMultiFilter("organizationalUnit", next)}
+              />
 
-              <select
-                className="h-9 rounded-md border bg-background px-3 text-sm"
-                value={filters.careerPath}
-                onChange={(event) => setFilters((prev) => ({ ...prev, careerPath: event.target.value }))}
-              >
-                <option value="">Career Path (All)</option>
-                {optionList(careerPaths)}
-              </select>
+              <MultiValueFilter
+                label="Career Path"
+                options={careerPaths}
+                selectedValues={filters.careerPath}
+                onSelectionChange={(next) => setMultiFilter("careerPath", next)}
+              />
 
-              <select
-                className="h-9 rounded-md border bg-background px-3 text-sm"
-                value={filters.functionalArea}
-                onChange={(event) => setFilters((prev) => ({ ...prev, functionalArea: event.target.value }))}
-              >
-                <option value="">Potential Area (All)</option>
-                {optionList(functionalAreas)}
-              </select>
+              <MultiValueFilter
+                label="Potential Area"
+                options={functionalAreas}
+                selectedValues={filters.functionalArea}
+                onSelectionChange={(next) => setMultiFilter("functionalArea", next)}
+              />
 
-              <select
-                className="h-9 rounded-md border bg-background px-3 text-sm"
-                value={filters.developmentPool}
-                onChange={(event) => setFilters((prev) => ({ ...prev, developmentPool: event.target.value }))}
-              >
-                <option value="">Development Pool (All)</option>
-                {optionList(developmentPools)}
-              </select>
+              <MultiValueFilter
+                label="Development Pool"
+                options={developmentPools}
+                selectedValues={filters.developmentPool}
+                onSelectionChange={(next) => setMultiFilter("developmentPool", next)}
+              />
             </div>
 
             <div className="flex flex-wrap items-center gap-4">
