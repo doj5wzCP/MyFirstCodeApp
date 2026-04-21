@@ -11,6 +11,19 @@ import type { CandidateProfile } from "@/lib/talent-types"
 import { analyzeUploadData, executeBulkImport, type ImportReview } from "@/lib/talent-data"
 
 type UploadedRow = Record<string, string>
+type ResolutionChoice = "uploaded" | "existing"
+type ConflictDecisions = Record<number, Partial<Record<keyof CandidateProfile, ResolutionChoice>>>
+
+const CONFLICT_FIELDS: Array<{ key: keyof CandidateProfile; label: string }> = [
+  { key: "firstName", label: "First Name" },
+  { key: "lastName", label: "Last Name" },
+  { key: "country", label: "Country" },
+  { key: "legalEntity", label: "Legal Entity" },
+  { key: "organizationalUnit", label: "Organizational Unit" },
+  { key: "careerPath", label: "Career Path" },
+  { key: "developmentPool", label: "Development Pool" },
+  { key: "promotionCandidate", label: "Self Nomination" },
+]
 
 type ExtendedCandidate = Partial<CandidateProfile> & {
   userSystemId?: string
@@ -45,20 +58,130 @@ export default function ExcelUploadPage() {
   const [showPreview, setShowPreview] = useState(false)
   const [showReview, setShowReview] = useState(false)
   const [uploadStatus, setUploadStatus] = useState("")
+  const [errorDetails, setErrorDetails] = useState<string[]>([])
   const [importReview, setImportReview] = useState<ImportReview | null>(null)
   const [selectedNewRecords, setSelectedNewRecords] = useState<Set<number>>(new Set())
   const [selectedChangedRecords, setSelectedChangedRecords] = useState<Set<number>>(new Set())
+  const [conflictDecisions, setConflictDecisions] = useState<ConflictDecisions>({})
 
-  // Parse CSV content
+  function normalizeText(value: string): string {
+    return value.trim().replace(/\s+/g, " ").toLowerCase()
+  }
+
+  function valuesDiffer(current: CandidateProfile[keyof CandidateProfile], incoming: CandidateProfile[keyof CandidateProfile]): boolean {
+    if (typeof current === "boolean" || typeof incoming === "boolean") {
+      return Boolean(current) !== Boolean(incoming)
+    }
+    return normalizeText(String(current ?? "")) !== normalizeText(String(incoming ?? ""))
+  }
+
+  function getChangedFields(existing: CandidateProfile, uploaded: Partial<CandidateProfile>): Array<keyof CandidateProfile> {
+    return CONFLICT_FIELDS
+      .filter(({ key }) => uploaded[key] !== undefined && valuesDiffer(existing[key], uploaded[key] as CandidateProfile[keyof CandidateProfile]))
+      .map(({ key }) => key)
+  }
+
+  function formatFieldValue(value: CandidateProfile[keyof CandidateProfile] | undefined): string {
+    if (typeof value === "boolean") return value ? "Yes" : "No"
+    return String(value ?? "(empty)")
+  }
+
+  function parseSeparatedLine(line: string, delimiter: string): string[] {
+    const values: string[] = []
+    let current = ""
+    let inQuotes = false
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i]
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"'
+          i++
+        } else {
+          inQuotes = !inQuotes
+        }
+        continue
+      }
+
+      if (char === delimiter && !inQuotes) {
+        values.push(current.trim())
+        current = ""
+        continue
+      }
+
+      current += char
+    }
+
+    values.push(current.trim())
+    return values
+  }
+
+  function detectDelimiter(headerLine: string): string {
+    const candidates = [",", "\t", ";"]
+    let selected = ","
+    let bestScore = -1
+
+    for (const candidate of candidates) {
+      const score = parseSeparatedLine(headerLine, candidate).length
+      if (score > bestScore) {
+        bestScore = score
+        selected = candidate
+      }
+    }
+
+    return selected
+  }
+
+  function normalizeHeader(value: string): string {
+    return value
+      .replace(/^\uFEFF/, "")
+      .replace(/^[^A-Za-z0-9]+/, "")
+      .replace(/["']/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/[_\s]+/g, " ")
+  }
+
+  function getRowValue(row: UploadedRow, ...aliases: string[]): string {
+    for (const alias of aliases) {
+      const direct = row[alias]
+      if (typeof direct === "string" && direct.trim()) return direct.trim()
+    }
+
+    const rowEntries = Object.entries(row)
+    const normalizedAliases = aliases.map(normalizeHeader)
+
+    for (const [key, value] of rowEntries) {
+      if (normalizedAliases.includes(normalizeHeader(key)) && value.trim()) {
+        return value.trim()
+      }
+    }
+
+    return ""
+  }
+
+  function parseBooleanValue(value: string): boolean {
+    const normalized = value.trim().toLowerCase()
+    if (["true", "yes", "y", "1"].includes(normalized)) return true
+    if (["false", "no", "n", "0"].includes(normalized)) return false
+    return false
+  }
+
+  // Parse CSV content (supports quoted commas and escaped quotes)
   function parseCSV(content: string): UploadedRow[] {
-    const lines = content.split("\n").filter((line) => line.trim())
+    const lines = content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+
     if (lines.length === 0) return []
 
-    const headers = lines[0].split(",").map((h) => h.trim())
+    const delimiter = detectDelimiter(lines[0])
+    const headers = parseSeparatedLine(lines[0], delimiter)
     const rows: UploadedRow[] = []
 
     for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(",").map((v) => v.trim())
+      const values = parseSeparatedLine(lines[i], delimiter)
       const row: UploadedRow = {}
       headers.forEach((header, idx) => {
         row[header] = values[idx] || ""
@@ -97,6 +220,7 @@ export default function ExcelUploadPage() {
 
     try {
       setLoading(true)
+      setErrorDetails([])
       setSelectedFile(file)
       const rows = await parseExcelFile(file)
 
@@ -111,7 +235,9 @@ export default function ExcelUploadPage() {
       setShowPreview(true)
       toast.success(`Loaded ${rows.length} rows from ${file.name}`)
     } catch (error) {
-      toast.error(`Error loading file: ${error instanceof Error ? error.message : "Unknown error"}`)
+      const message = error instanceof Error ? error.message : "Unknown error"
+      setErrorDetails([`Error loading file: ${message}`])
+      toast.error(`Error loading file: ${message}`)
       setSelectedFile(null)
     } finally {
       setLoading(false)
@@ -121,37 +247,37 @@ export default function ExcelUploadPage() {
   // Map CSV columns to Extended Candidate Profile
   function mapRowToCandidate(row: UploadedRow): ExtendedCandidate {
     return {
-      firstName: row["First Name"] || row["first_name"] || "",
-      lastName: row["Last Name"] || row["last_name"] || "",
-      globalId: row["Global ID"] || row["global_id"] || "",
-      country: row["Talent Metric: Country"] || row["Country"] || row["country"] || "",
-      legalEntity: row["Legal Entity"] || row["legal_entity"] || "",
-      organizationalUnit: row["Organizational Unit"] || row["organizational_unit"] || "",
-      careerPath: row["Talent Metric: Career Path"] || row["Career Path"] || row["career_path"] || "",
-      developmentPool: row["Development Pool"] || row["development_pool"] || "",
-      promotionCandidate: (row["Self Nomination"] || row["self_nomination"] || "").toLowerCase() === "true",
-      userSystemId: row["User System ID"] || "",
-      localId: row["Local ID"] || "",
-      username: row["Username"] || "",
-      hrManagerUsername: row["HR Manager Username"] || "",
-      hrManagerFirstName: row["HR Manager First Name"] || "",
-      hrManagerLastName: row["HR Manager Last Name"] || "",
-      targetManagerFirstName: row["Target Manager First Name"] || "",
-      targetManagerLastName: row["Target Manager Last Name"] || "",
-      executiveManagement: row["Executive Management"] || "",
-      location: row["Location"] || "",
-      functionalArea: row["Functional Area"] || "",
-      globalEmployeeGroup: row["Global Employee Group"] || "",
-      dateOfBirth: row["Date of Birth"] || "",
-      age: row["Talent Metric: Age"] || "",
-      gender: row["Talent Metric: Gender"] || "",
-      nominationComments: row["Nomination Comments"] || "",
-      talentPoolStart: row["Talent Pool Start"] || "",
-      talentPoolEnd: row["Talent Pool End"] || "",
-      referencesBAMS: row["References BA-MS"] || "",
-      followUpMeasures: row["Follow-Up Measures"] || "",
-      selfNomination: row["Self Nomination"] || "",
-      email: row["Email"] || row["email"] || "",
+      firstName: getRowValue(row, "First Name", "first_name", "FirstName"),
+      lastName: getRowValue(row, "Last Name", "last_name", "LastName"),
+      globalId: getRowValue(row, "Global ID", "global_id", "GlobalID"),
+      country: getRowValue(row, "Talent Metric: Country", "Country", "country"),
+      legalEntity: getRowValue(row, "Legal Entity", "legal_entity", "LegalEntity"),
+      organizationalUnit: getRowValue(row, "Organizational Unit", "organizational_unit", "OrganizationalUnit"),
+      careerPath: getRowValue(row, "Talent Metric: Career Path", "Career Path", "career_path", "CareerPath"),
+      developmentPool: getRowValue(row, "Development Pool", "development_pool", "DevelopmentPool"),
+      promotionCandidate: parseBooleanValue(getRowValue(row, "Self Nomination", "self_nomination", "SelfNomination")),
+      userSystemId: getRowValue(row, "User System ID", "UserSystemID"),
+      localId: getRowValue(row, "Local ID", "LocalID"),
+      username: getRowValue(row, "Username"),
+      hrManagerUsername: getRowValue(row, "HR Manager Username"),
+      hrManagerFirstName: getRowValue(row, "HR Manager First Name"),
+      hrManagerLastName: getRowValue(row, "HR Manager Last Name"),
+      targetManagerFirstName: getRowValue(row, "Target Manager First Name"),
+      targetManagerLastName: getRowValue(row, "Target Manager Last Name"),
+      executiveManagement: getRowValue(row, "Executive Management"),
+      location: getRowValue(row, "Location"),
+      functionalArea: getRowValue(row, "Functional Area"),
+      globalEmployeeGroup: getRowValue(row, "Global Employee Group"),
+      dateOfBirth: getRowValue(row, "Date of Birth"),
+      age: getRowValue(row, "Talent Metric: Age", "Age"),
+      gender: getRowValue(row, "Talent Metric: Gender", "Gender"),
+      nominationComments: getRowValue(row, "Nomination Comments"),
+      talentPoolStart: getRowValue(row, "Talent Pool Start"),
+      talentPoolEnd: getRowValue(row, "Talent Pool End"),
+      referencesBAMS: getRowValue(row, "References BA-MS", "References BAMS"),
+      followUpMeasures: getRowValue(row, "Follow-Up Measures", "Follow Up Measures"),
+      selfNomination: getRowValue(row, "Self Nomination", "self_nomination", "SelfNomination"),
+      email: getRowValue(row, "Email", "email"),
     }
   }
 
@@ -165,11 +291,38 @@ export default function ExcelUploadPage() {
     try {
       setLoading(true)
       setUploadStatus("Analyzing data...")
+      setErrorDetails([])
 
       const candidates = uploadedRows.map(mapRowToCandidate)
+      const missingGlobalIdRows = candidates
+        .map((candidate, index) => ({ index, globalId: candidate.globalId ?? "" }))
+        .filter((x) => !x.globalId.trim())
+
+      if (missingGlobalIdRows.length > 0) {
+        const detectedHeaders = Object.keys(uploadedRows[0] ?? {})
+          .map((h) => h || "(empty)")
+          .slice(0, 12)
+          .join(" | ")
+        throw new Error(
+          `Missing Global ID in ${missingGlobalIdRows.length} row(s). First few row indexes: ${missingGlobalIdRows
+            .slice(0, 5)
+            .map((x) => x.index + 2)
+            .join(", ")}. Detected headers: ${detectedHeaders}`
+        )
+      }
+
       const review = await analyzeUploadData(candidates)
+      const initialDecisions: ConflictDecisions = {}
+      review.changedRecords.forEach(({ existing, uploaded }, idx) => {
+        const fieldDecisions: Partial<Record<keyof CandidateProfile, ResolutionChoice>> = {}
+        getChangedFields(existing, uploaded).forEach((field) => {
+          fieldDecisions[field] = "uploaded"
+        })
+        initialDecisions[idx] = fieldDecisions
+      })
 
       setImportReview(review)
+      setConflictDecisions(initialDecisions)
       setSelectedNewRecords(new Set(Array.from({ length: review.newRecords.length }, (_, i) => i)))
       setSelectedChangedRecords(new Set(Array.from({ length: review.changedRecords.length }, (_, i) => i)))
       setShowPreview(false)
@@ -179,7 +332,13 @@ export default function ExcelUploadPage() {
         `Analysis complete: ${review.newRecords.length} new, ${review.changedRecords.length} changed, ${review.skippedRecords.length} unchanged`
       )
     } catch (error) {
-      toast.error(`Analysis failed: ${error instanceof Error ? error.message : "Unknown error"}`)
+      const message = error instanceof Error ? error.message : "Unknown error"
+      setErrorDetails([
+        `Analysis failed: ${message}`,
+        "Tip: verify CSV headers exactly match expected names, especially Global ID.",
+        "Tip: if a value contains commas, it must be wrapped in double quotes.",
+      ])
+      toast.error(`Analysis failed: ${message}`)
       setUploadStatus("Analysis failed")
     } finally {
       setLoading(false)
@@ -193,15 +352,40 @@ export default function ExcelUploadPage() {
     try {
       setLoading(true)
       setUploadStatus("Importing...")
+      setErrorDetails([])
 
       // Prepare data for import
       const newRecords = importReview.newRecords.filter((_, i) => selectedNewRecords.has(i))
       const updatedRecords = importReview.changedRecords
-        .filter((_, i) => selectedChangedRecords.has(i))
-        .map(({ existing, uploaded }) => ({
-          id: existing.id,
-          updates: uploaded,
-        }))
+        .map(({ existing, uploaded }, i) => {
+          if (!selectedChangedRecords.has(i)) return null
+
+          const updates: Partial<CandidateProfile> = {}
+          const changedFields = getChangedFields(existing, uploaded)
+          changedFields.forEach((field) => {
+            const decision = conflictDecisions[i]?.[field] ?? "uploaded"
+            if (decision === "uploaded") {
+              if (field === "firstName" && uploaded.firstName !== undefined) updates.firstName = uploaded.firstName
+              if (field === "lastName" && uploaded.lastName !== undefined) updates.lastName = uploaded.lastName
+              if (field === "country" && uploaded.country !== undefined) updates.country = uploaded.country
+              if (field === "legalEntity" && uploaded.legalEntity !== undefined) updates.legalEntity = uploaded.legalEntity
+              if (field === "organizationalUnit" && uploaded.organizationalUnit !== undefined) {
+                updates.organizationalUnit = uploaded.organizationalUnit
+              }
+              // careerPath is displayed as a conflict but not written from CSV label text (OptionSet in Dataverse)
+              if (field === "developmentPool" && uploaded.developmentPool !== undefined) {
+                updates.developmentPool = uploaded.developmentPool
+              }
+              if (field === "promotionCandidate" && uploaded.promotionCandidate !== undefined) {
+                updates.promotionCandidate = uploaded.promotionCandidate
+              }
+            }
+          })
+
+          if (Object.keys(updates).length === 0) return null
+          return { id: existing.id, updates }
+        })
+        .filter((row): row is { id: string; updates: Partial<CandidateProfile> } => row !== null)
 
       const result = await executeBulkImport(newRecords, updatedRecords)
 
@@ -213,15 +397,18 @@ export default function ExcelUploadPage() {
       )
 
       if (result.errors.length > 0) {
-        result.errors.forEach((error) => console.error(error))
+        setErrorDetails(result.errors)
       }
 
       setShowReview(false)
       setUploadedRows([])
       setSelectedFile(null)
       setImportReview(null)
+      setConflictDecisions({})
     } catch (error) {
-      toast.error(`Import failed: ${error instanceof Error ? error.message : "Unknown error"}`)
+      const message = error instanceof Error ? error.message : "Unknown error"
+      setErrorDetails([`Import failed: ${message}`])
+      toast.error(`Import failed: ${message}`)
       setUploadStatus("Import failed")
     } finally {
       setLoading(false)
@@ -290,6 +477,17 @@ export default function ExcelUploadPage() {
                 <strong>Status:</strong> {uploadStatus}
               </div>
             )}
+
+            {errorDetails.length > 0 && (
+              <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm">
+                <div className="font-semibold text-red-900">Error details</div>
+                <ul className="mt-2 list-disc pl-5 text-red-800">
+                  {errorDetails.map((detail, idx) => (
+                    <li key={idx}>{detail}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -351,61 +549,82 @@ export default function ExcelUploadPage() {
 
       {/* Preview Dialog */}
       <Dialog open={showPreview} onOpenChange={setShowPreview}>
-        <DialogContent className="max-w-5xl max-h-96">
-          <DialogHeader>
-            <DialogTitle>Data Preview</DialogTitle>
-            <DialogDescription>
-              Showing first {preview.length} of {uploadedRows.length} rows. Review before proceeding.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="h-[94vh] w-[98vw] !max-w-[98vw] sm:!max-w-[98vw] overflow-hidden p-0">
+          <div className="grid h-full grid-rows-[auto_minmax(0,1fr)_auto] gap-3 p-4 sm:p-6">
+            <DialogHeader className="shrink-0">
+              <DialogTitle>Data Preview</DialogTitle>
+              <DialogDescription>
+                Showing first {preview.length} of {uploadedRows.length} rows. Review before proceeding.
+              </DialogDescription>
+              <div className="text-xs text-muted-foreground">
+                Columns detected: {Object.keys(preview[0] || {}).length}. Use the horizontal scrollbar to see all columns.
+              </div>
+            </DialogHeader>
 
-          <div className="overflow-x-auto rounded-md border">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b bg-muted">
-                  {Object.keys(preview[0] || {}).map((key) => (
-                    <th key={key} className="px-3 py-2 text-left font-semibold whitespace-nowrap">
-                      {key}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {preview.map((row, idx) => (
-                  <tr key={idx} className="border-b hover:bg-muted/50">
-                    {Object.values(row).map((value, cidx) => (
-                      <td key={cidx} className="px-3 py-2 truncate max-w-xs text-muted-foreground">
-                        {value || "-"}
-                      </td>
+            <div className="min-h-0 space-y-3 overflow-hidden">
+              <div className="h-full rounded-md border">
+                <div className="h-full overflow-x-auto overflow-y-auto [scrollbar-gutter:stable]">
+                  <table className="w-max min-w-full text-xs">
+                    <thead>
+                      <tr className="border-b bg-muted">
+                        {Object.keys(preview[0] || {}).map((key) => (
+                          <th key={key} className="px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            {key}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.map((row, idx) => (
+                        <tr key={idx} className="border-b hover:bg-muted/50">
+                          {Object.values(row).map((value, cidx) => (
+                            <td key={cidx} className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                              {value || "-"}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {errorDetails.length > 0 && (
+                <div className="max-h-28 overflow-auto rounded-md border border-red-300 bg-red-50 p-3 text-xs">
+                  <div className="font-semibold text-red-900">Debug details</div>
+                  <ul className="mt-2 list-disc pl-5 text-red-800">
+                    {errorDetails.map((detail, idx) => (
+                      <li key={idx}>{detail}</li>
                     ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  </ul>
+                </div>
+              )}
+            </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowPreview(false)}>
-              Cancel
-            </Button>
-            <Button onClick={() => void handleAnalyzeData()} disabled={loading}>
-              {loading ? "Analyzing..." : "Proceed to Review"}
-            </Button>
-          </DialogFooter>
+            <DialogFooter className="shrink-0 border-t pt-3">
+              <Button variant="outline" onClick={() => setShowPreview(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => void handleAnalyzeData()} disabled={loading}>
+                {loading ? "Analyzing..." : "Proceed to Review"}
+              </Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
       {/* Review & Confirmation Dialog */}
       <Dialog open={showReview} onOpenChange={setShowReview}>
-        <DialogContent className="max-w-4xl max-h-96">
-          <DialogHeader>
-            <DialogTitle>Review Import</DialogTitle>
-            <DialogDescription>
-              Select which records to create or update. Unselected records will be skipped.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="h-[94vh] w-[98vw] !max-w-[98vw] sm:!max-w-[98vw] overflow-hidden p-0">
+          <div className="grid h-full grid-rows-[auto_minmax(0,1fr)_auto] gap-3 p-4 sm:p-6">
+            <DialogHeader className="shrink-0">
+              <DialogTitle>Review Import</DialogTitle>
+              <DialogDescription>
+                Select which records to create or update. Unselected records will be skipped.
+              </DialogDescription>
+            </DialogHeader>
 
-          <div className="space-y-4 overflow-y-auto max-h-64">
+            <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
             {/* New Records */}
             {importReview && importReview.newRecords.length > 0 && (
               <div>
@@ -474,26 +693,87 @@ export default function ExcelUploadPage() {
                   </label>
                 </div>
                 <div className="space-y-2 pl-6 text-xs">
-                  {importReview.changedRecords.map(({ existing }, idx) => (
-                    <div key={idx} className="flex items-center gap-2 border-l-2 border-amber-300 pl-2">
-                      <Checkbox
-                        id={`changed-${idx}`}
-                        checked={selectedChangedRecords.has(idx)}
-                        onCheckedChange={(checked) => {
-                          const newSet = new Set(selectedChangedRecords)
-                          if (checked) {
-                            newSet.add(idx)
-                          } else {
-                            newSet.delete(idx)
-                          }
-                          setSelectedChangedRecords(newSet)
-                        }}
-                      />
-                      <label htmlFor={`changed-${idx}`} className="cursor-pointer">
-                        {existing.firstName} {existing.lastName} (will update with uploaded data)
-                      </label>
-                    </div>
-                  ))}
+                  {importReview.changedRecords.map(({ existing, uploaded }, idx) => {
+                    const changedFields = getChangedFields(existing, uploaded)
+                    return (
+                      <div key={idx} className="rounded-md border border-amber-200 bg-amber-50/40 p-3">
+                        <div className="mb-2 flex items-center gap-2 border-b pb-2">
+                          <Checkbox
+                            id={`changed-${idx}`}
+                            checked={selectedChangedRecords.has(idx)}
+                            onCheckedChange={(checked) => {
+                              const newSet = new Set(selectedChangedRecords)
+                              if (checked) {
+                                newSet.add(idx)
+                              } else {
+                                newSet.delete(idx)
+                              }
+                              setSelectedChangedRecords(newSet)
+                            }}
+                          />
+                          <label htmlFor={`changed-${idx}`} className="cursor-pointer font-medium">
+                            {existing.firstName} {existing.lastName} (ID: {existing.globalId})
+                          </label>
+                        </div>
+
+                        <div className="space-y-2">
+                          {changedFields.map((field) => {
+                            const fieldLabel = CONFLICT_FIELDS.find((f) => f.key === field)?.label ?? String(field)
+                            const decision = conflictDecisions[idx]?.[field] ?? "uploaded"
+                            return (
+                              <div key={`${idx}-${String(field)}`} className="rounded border bg-white p-2">
+                                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                  {fieldLabel}
+                                </div>
+                                {field === "careerPath" && (
+                                  <div className="mb-2 text-[11px] text-amber-700">
+                                    Displayed for conflict visibility. CSV label value is not written automatically for this OptionSet field.
+                                  </div>
+                                )}
+                                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                  <button
+                                    type="button"
+                                    className={`rounded border px-2 py-1 text-left text-[11px] ${
+                                      decision === "existing" ? "border-emerald-500 bg-emerald-50" : "border-muted"
+                                    }`}
+                                    onClick={() =>
+                                      setConflictDecisions((prev) => ({
+                                        ...prev,
+                                        [idx]: { ...(prev[idx] ?? {}), [field]: "existing" },
+                                      }))
+                                    }
+                                  >
+                                    <div className="font-semibold">Keep Current</div>
+                                    <div className="truncate text-muted-foreground">
+                                      {formatFieldValue(existing[field])}
+                                    </div>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className={`rounded border px-2 py-1 text-left text-[11px] ${
+                                      decision === "uploaded" ? "border-blue-500 bg-blue-50" : "border-muted"
+                                    }`}
+                                    onClick={() =>
+                                      setConflictDecisions((prev) => ({
+                                        ...prev,
+                                        [idx]: { ...(prev[idx] ?? {}), [field]: "uploaded" },
+                                      }))
+                                    }
+                                  >
+                                    <div className="font-semibold">Use Uploaded</div>
+                                    <div className="truncate text-muted-foreground">
+                                      {formatFieldValue(uploaded[field])}
+                                    </div>
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -505,16 +785,28 @@ export default function ExcelUploadPage() {
                 <p className="text-muted-foreground">These records already exist and match the upload data.</p>
               </div>
             )}
-          </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowReview(false)}>
-              Back to Preview
-            </Button>
-            <Button onClick={() => void handleConfirmImport()} disabled={loading}>
-              {loading ? "Importing..." : "Confirm Import"}
-            </Button>
-          </DialogFooter>
+            {errorDetails.length > 0 && (
+              <div className="max-h-28 overflow-auto rounded-md border border-red-300 bg-red-50 p-3 text-xs">
+                <div className="font-semibold text-red-900">Debug details</div>
+                <ul className="mt-2 list-disc pl-5 text-red-800">
+                  {errorDetails.map((detail, idx) => (
+                    <li key={idx}>{detail}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            </div>
+
+            <DialogFooter className="shrink-0 border-t pt-3">
+              <Button variant="outline" onClick={() => setShowReview(false)}>
+                Back to Preview
+              </Button>
+              <Button onClick={() => void handleConfirmImport()} disabled={loading}>
+                {loading ? "Importing..." : "Confirm Import"}
+              </Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -7,6 +7,7 @@ export type CandidateProfile = {
   legalEntity: string
   organizationalUnit: string
   careerPath: string
+  functionalArea: string
   developmentPool: string
   promotionCandidate: boolean
 }
@@ -25,6 +26,7 @@ export type CandidateFilters = {
   legalEntity: string
   organizationalUnit: string
   careerPath: string
+  functionalArea: string
   developmentPool: string
   onlyPromotionCandidates: boolean
   searchText: string
@@ -35,6 +37,7 @@ export const emptyFilters: CandidateFilters = {
   legalEntity: "",
   organizationalUnit: "",
   careerPath: "",
+  functionalArea: "",
   developmentPool: "",
   onlyPromotionCandidates: false,
   searchText: "",

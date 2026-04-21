@@ -340,6 +340,7 @@ function mapCandidate(row: Row): CandidateProfile {
     organizationalUnit: str(row, "doj5wz_organizationalunit"),
     // careerpath is an OptionSet — SDK returns label in OData@formattedValue or as string key
     careerPath: str(row, "doj5wz_careerpath@OData.Community.Display.V1.FormattedValue", "doj5wz_careerpath"),
+    functionalArea: str(row, "doj5wz_functionalarea"),
     developmentPool: str(row, "doj5wz_developmentpool"),
     promotionCandidate: bool(row, "doj5wz_selfnomination"),
   }
@@ -369,6 +370,7 @@ function applyFilters(items: CandidateProfile[], filters: CandidateFilters): Can
     if (filters.legalEntity && c.legalEntity !== filters.legalEntity) return false
     if (filters.organizationalUnit && c.organizationalUnit !== filters.organizationalUnit) return false
     if (filters.careerPath && c.careerPath !== filters.careerPath) return false
+    if (filters.functionalArea && c.functionalArea !== filters.functionalArea) return false
     if (filters.developmentPool && c.developmentPool !== filters.developmentPool) return false
     if (filters.onlyPromotionCandidates && !c.promotionCandidate) return false
     if (filters.searchText) {
@@ -393,6 +395,7 @@ export async function listCandidates(filters: CandidateFilters = emptyFilters): 
     "doj5wz_legalentity",
     "doj5wz_organizationalunit",
     "doj5wz_careerpath",
+    "doj5wz_functionalarea",
     "doj5wz_developmentpool",
     "doj5wz_selfnomination",
   ]
@@ -435,6 +438,7 @@ export async function getCandidate(candidateId: string): Promise<CandidateProfil
     "doj5wz_legalentity",
     "doj5wz_organizationalunit",
     "doj5wz_careerpath",
+    "doj5wz_functionalarea",
     "doj5wz_developmentpool",
     "doj5wz_selfnomination",
   ]
@@ -477,6 +481,7 @@ export async function updateCandidate(
   if (updatedFields.country !== undefined) payload.doj5wz_country = updatedFields.country
   if (updatedFields.legalEntity !== undefined) payload.doj5wz_legalentity = updatedFields.legalEntity
   if (updatedFields.organizationalUnit !== undefined) payload.doj5wz_organizationalunit = updatedFields.organizationalUnit
+  if (updatedFields.functionalArea !== undefined) payload.doj5wz_functionalarea = updatedFields.functionalArea
   if (updatedFields.developmentPool !== undefined) payload.doj5wz_developmentpool = updatedFields.developmentPool
   if (updatedFields.promotionCandidate !== undefined) payload.doj5wz_selfnomination = updatedFields.promotionCandidate
   // careerpath is an OptionSet integer — skipped for free-text edit; map values later if needed
@@ -645,6 +650,14 @@ export type ImportReview = {
   skippedRecords: CandidateProfile[]
 }
 
+function normalizeText(value: string | undefined): string {
+  return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase()
+}
+
+function isSameText(left: string | undefined, right: string | undefined): boolean {
+  return normalizeText(left) === normalizeText(right)
+}
+
 export async function analyzeUploadData(
   uploadedCandidates: Partial<CandidateProfile>[]
 ): Promise<ImportReview> {
@@ -659,8 +672,10 @@ export async function analyzeUploadData(
     const skippedRecords: CandidateProfile[] = []
 
     for (const uploaded of uploadedCandidates) {
+      const uploadedGlobalId = normalizeText(uploaded.globalId)
+
       // Try to find existing by globalId
-      const existing = existingCandidates.find((c) => c.globalId && c.globalId === uploaded.globalId)
+      const existing = existingCandidates.find((c) => normalizeText(c.globalId) === uploadedGlobalId)
 
       if (!existing) {
         // Map to full CandidateProfile with defaults
@@ -673,6 +688,7 @@ export async function analyzeUploadData(
           legalEntity: uploaded.legalEntity || "",
           organizationalUnit: uploaded.organizationalUnit || "",
           careerPath: uploaded.careerPath || "",
+          functionalArea: uploaded.functionalArea || "",
           developmentPool: uploaded.developmentPool || "",
           promotionCandidate: uploaded.promotionCandidate ?? false,
         }
@@ -680,13 +696,14 @@ export async function analyzeUploadData(
       } else {
         // Check if any fields are different
         const isDifferent =
-          (uploaded.firstName && uploaded.firstName !== existing.firstName) ||
-          (uploaded.lastName && uploaded.lastName !== existing.lastName) ||
-          (uploaded.country && uploaded.country !== existing.country) ||
-          (uploaded.legalEntity && uploaded.legalEntity !== existing.legalEntity) ||
-          (uploaded.organizationalUnit && uploaded.organizationalUnit !== existing.organizationalUnit) ||
-          (uploaded.careerPath && uploaded.careerPath !== existing.careerPath) ||
-          (uploaded.developmentPool && uploaded.developmentPool !== existing.developmentPool) ||
+          (uploaded.firstName && !isSameText(uploaded.firstName, existing.firstName)) ||
+          (uploaded.lastName && !isSameText(uploaded.lastName, existing.lastName)) ||
+          (uploaded.country && !isSameText(uploaded.country, existing.country)) ||
+          (uploaded.legalEntity && !isSameText(uploaded.legalEntity, existing.legalEntity)) ||
+          (uploaded.organizationalUnit && !isSameText(uploaded.organizationalUnit, existing.organizationalUnit)) ||
+          (uploaded.careerPath && !isSameText(uploaded.careerPath, existing.careerPath)) ||
+          (uploaded.functionalArea && !isSameText(uploaded.functionalArea, existing.functionalArea)) ||
+          (uploaded.developmentPool && !isSameText(uploaded.developmentPool, existing.developmentPool)) ||
           (uploaded.promotionCandidate !== undefined && uploaded.promotionCandidate !== existing.promotionCandidate)
 
         if (isDifferent) {
@@ -727,7 +744,8 @@ export async function executeBulkImport(
           doj5wz_country: candidate.country,
           doj5wz_legalentity: candidate.legalEntity,
           doj5wz_organizationalunit: candidate.organizationalUnit,
-          doj5wz_careerpath: candidate.careerPath,
+          // careerpath is an OptionSet integer; skip free-text labels from CSV imports
+          doj5wz_functionalarea: candidate.functionalArea,
           doj5wz_developmentpool: candidate.developmentPool,
           doj5wz_selfnomination: candidate.promotionCandidate,
         }
@@ -745,8 +763,9 @@ export async function executeBulkImport(
         }
         createdCount++
       } catch (error) {
+        const message = formatOperationError(error, "Unknown error")
         errors.push(
-          `Failed to create ${candidate.firstName} ${candidate.lastName}: ${error instanceof Error ? error.message : "Unknown error"}`
+          `Failed to create ${candidate.firstName} ${candidate.lastName}: ${message}`
         )
       }
     }
@@ -760,8 +779,14 @@ export async function executeBulkImport(
         if (updates.country) payload.doj5wz_country = updates.country
         if (updates.legalEntity) payload.doj5wz_legalentity = updates.legalEntity
         if (updates.organizationalUnit) payload.doj5wz_organizationalunit = updates.organizationalUnit
+        // careerpath is an OptionSet integer; skip free-text labels from CSV imports
+        if (updates.functionalArea) payload.doj5wz_functionalarea = updates.functionalArea
         if (updates.developmentPool) payload.doj5wz_developmentpool = updates.developmentPool
         if (updates.promotionCandidate !== undefined) payload.doj5wz_selfnomination = updates.promotionCandidate
+
+        if (Object.keys(payload).length === 0) {
+          continue
+        }
 
         if (runtime === "bridge") {
           const client = getClient(dataSourcesInfo)
@@ -776,7 +801,8 @@ export async function executeBulkImport(
         }
         updatedCount++
       } catch (error) {
-        errors.push(`Failed to update record ${id}: ${error instanceof Error ? error.message : "Unknown error"}`)
+        const message = formatOperationError(error, "Unknown error")
+        errors.push(`Failed to update record ${id}: ${message}`)
       }
     }
 
@@ -784,6 +810,42 @@ export async function executeBulkImport(
     return { created: createdCount, updated: updatedCount, errors }
   } catch (error) {
     const message = setErrorStatus(operation, error, "Bulk import failed")
+    throw new Error(message)
+  }
+}
+
+export async function replaceAttributeValue(
+  field: "developmentPool" | "functionalArea",
+  oldValue: string,
+  newValue: string
+): Promise<number> {
+  const operation = "replaceAttributeValue"
+  const trimmedOld = oldValue.trim()
+  const trimmedNew = newValue.trim()
+
+  if (!trimmedOld || !trimmedNew) throw new Error("Both old and new values are required")
+  if (trimmedOld.toLowerCase() === trimmedNew.toLowerCase()) return 0
+
+  try {
+    const candidates = await listCandidates(emptyFilters)
+    const matched = candidates.filter((candidate) => {
+      const value = field === "developmentPool" ? candidate.developmentPool : candidate.functionalArea
+      return value.trim().toLowerCase() === trimmedOld.toLowerCase()
+    })
+
+    for (const candidate of matched) {
+      await updateCandidate(
+        candidate.id,
+        field === "developmentPool"
+          ? { developmentPool: trimmedNew }
+          : { functionalArea: trimmedNew }
+      )
+    }
+
+    setDataverseConnected(operation)
+    return matched.length
+  } catch (error) {
+    const message = setErrorStatus(operation, error, "Failed to replace attribute value")
     throw new Error(message)
   }
 }

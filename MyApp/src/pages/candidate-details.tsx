@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { mergeCatalogWithObserved } from "@/lib/attribute-catalog"
 import { createNote, getCandidate, listNotes, updateCandidate } from "@/lib/talent-data"
 import type { CandidateNote, CandidateProfile } from "@/lib/talent-types"
 import { toast } from "sonner"
@@ -45,6 +46,9 @@ export default function CandidateDetailsPage() {
   const [newNoteTitle, setNewNoteTitle] = useState("")
   const [newNoteDescription, setNewNoteDescription] = useState("")
   const [loading, setLoading] = useState(true)
+
+  const developmentPoolOptions = mergeCatalogWithObserved("developmentPool", [draft?.developmentPool ?? ""])
+  const potentialAreaOptions = mergeCatalogWithObserved("functionalArea", [draft?.functionalArea ?? ""])
 
   async function loadCandidateAndNotes(search = noteSearch) {
     if (!candidateId) return
@@ -211,12 +215,48 @@ export default function CandidateDetailsPage() {
                   editable={isEditing}
                   onChange={(value) => setDraft((prev) => (prev ? { ...prev, careerPath: value } : prev))}
                 />
-                <DetailField
-                  label="Development Pool"
-                  value={draft.developmentPool}
-                  editable={isEditing}
-                  onChange={(value) => setDraft((prev) => (prev ? { ...prev, developmentPool: value } : prev))}
-                />
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Potential Area</Label>
+                  {isEditing ? (
+                    <>
+                      <Input
+                        list="potential-area-options"
+                        value={draft.functionalArea}
+                        onChange={(event) =>
+                          setDraft((prev) => (prev ? { ...prev, functionalArea: event.target.value } : prev))
+                        }
+                      />
+                      <datalist id="potential-area-options">
+                        {potentialAreaOptions.map((option) => (
+                          <option key={option} value={option} />
+                        ))}
+                      </datalist>
+                    </>
+                  ) : (
+                    <div className="min-h-9 rounded-md border px-3 py-2 text-sm">{candidate.functionalArea || "-"}</div>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Readiness Level (Development Pool)</Label>
+                  {isEditing ? (
+                    <>
+                      <Input
+                        list="development-pool-options"
+                        value={draft.developmentPool}
+                        onChange={(event) =>
+                          setDraft((prev) => (prev ? { ...prev, developmentPool: event.target.value } : prev))
+                        }
+                      />
+                      <datalist id="development-pool-options">
+                        {developmentPoolOptions.map((option) => (
+                          <option key={option} value={option} />
+                        ))}
+                      </datalist>
+                    </>
+                  ) : (
+                    <div className="min-h-9 rounded-md border px-3 py-2 text-sm">{candidate.developmentPool || "-"}</div>
+                  )}
+                </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Promotion Candidate</Label>
                   {isEditing ? (

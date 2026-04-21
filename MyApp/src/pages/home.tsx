@@ -49,6 +49,7 @@ export default function HomePage() {
     filters.legalEntity,
     filters.organizationalUnit,
     filters.careerPath,
+    filters.functionalArea,
     filters.developmentPool,
     filters.onlyPromotionCandidates,
     filters.searchText,
@@ -67,6 +68,10 @@ export default function HomePage() {
     () => [...new Set(candidates.map((item) => item.careerPath).filter(Boolean))],
     [candidates]
   )
+  const functionalAreas = useMemo(
+    () => [...new Set(candidates.map((item) => item.functionalArea).filter(Boolean))],
+    [candidates]
+  )
   const developmentPools = useMemo(
     () => [...new Set(candidates.map((item) => item.developmentPool).filter(Boolean))],
     [candidates]
@@ -81,7 +86,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="h-full p-6 md:p-8 bg-[linear-gradient(180deg,rgba(0,0,0,0.02),transparent_220px)]">
+    <div className="h-full bg-[linear-gradient(180deg,var(--bosch-wash),transparent_220px)] p-6 md:p-8">
       <div className="mx-auto flex h-full w-full max-w-7xl flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
           <div>
@@ -90,13 +95,13 @@ export default function HomePage() {
           </div>
           <div className="flex items-center gap-2">
             <span
-              className={`rounded-sm border px-2 py-1 text-xs ${
+              className={`status-chip ${
                 connectionStatus.mode === "dataverse"
-                  ? "border-emerald-600/40 text-emerald-700"
+                  ? "status-chip--dataverse"
                   : connectionStatus.mode === "fallback"
-                    ? "border-amber-600/40 text-amber-700"
+                    ? "status-chip--fallback"
                     : connectionStatus.mode === "error"
-                      ? "border-red-600/40 text-red-700"
+                      ? "status-chip--error"
                       : ""
               }`}
             >
@@ -141,7 +146,7 @@ export default function HomePage() {
             <CardTitle className="text-base">Filters</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-6">
               <select
                 className="h-9 rounded-md border bg-background px-3 text-sm"
                 value={filters.country}
@@ -176,6 +181,15 @@ export default function HomePage() {
               >
                 <option value="">Career Path (All)</option>
                 {optionList(careerPaths)}
+              </select>
+
+              <select
+                className="h-9 rounded-md border bg-background px-3 text-sm"
+                value={filters.functionalArea}
+                onChange={(event) => setFilters((prev) => ({ ...prev, functionalArea: event.target.value }))}
+              >
+                <option value="">Potential Area (All)</option>
+                {optionList(functionalAreas)}
               </select>
 
               <select
@@ -243,7 +257,7 @@ export default function HomePage() {
                   <div>{candidate.country || candidate.organizationalUnit}</div>
                   <div>{candidate.careerPath || candidate.developmentPool}</div>
                   <div className="text-right">
-                    <span className="rounded-sm border px-2 py-1 text-xs">Open</span>
+                    <span className="candidate-open-chip">Open</span>
                   </div>
                 </button>
               ))
