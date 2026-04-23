@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -15,23 +15,33 @@ import { toast } from "sonner"
 function DetailField({
   label,
   value,
-  editable,
   onChange,
 }: {
   label: string
   value: string
-  editable: boolean
   onChange: (value: string) => void
 }) {
   return (
     <div className="space-y-1">
       <Label className="text-xs text-muted-foreground">{label}</Label>
-      {editable ? (
-        <Input value={value} onChange={(event) => onChange(event.target.value)} />
-      ) : (
-        <div className="min-h-9 rounded-md border px-3 py-2 text-sm">{value || "-"}</div>
-      )}
+      <Input value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
+  )
+}
+
+function areCandidatesEqual(left: CandidateProfile | null, right: CandidateProfile | null) {
+  if (!left || !right) return false
+  return (
+    left.firstName === right.firstName
+    && left.lastName === right.lastName
+    && left.globalId === right.globalId
+    && left.country === right.country
+    && left.legalEntity === right.legalEntity
+    && left.organizationalUnit === right.organizationalUnit
+    && left.careerPath === right.careerPath
+    && left.functionalArea === right.functionalArea
+    && left.developmentPool === right.developmentPool
+    && left.promotionCandidate === right.promotionCandidate
   )
 }
 
@@ -92,33 +102,36 @@ export default function CandidateDetailsPage() {
   const navigate = useNavigate()
   const [candidate, setCandidate] = useState<CandidateProfile | null>(null)
   const [draft, setDraft] = useState<CandidateProfile | null>(null)
-  const [isEditing, setIsEditing] = useState(false)
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const [notes, setNotes] = useState<CandidateNote[]>([])
   const [noteSearch, setNoteSearch] = useState("")
   const [showDialog, setShowDialog] = useState(false)
   const [newNoteTitle, setNewNoteTitle] = useState("")
   const [newNoteDescription, setNewNoteDescription] = useState("")
   const [loading, setLoading] = useState(true)
+  const latestSaveRequestId = useRef(0)
 
   const groupedNotes = groupNotesByDay(notes)
 
   const developmentPoolOptions = mergeCatalogWithObserved("developmentPool", [draft?.developmentPool ?? ""])
   const potentialAreaOptions = mergeCatalogWithObserved("functionalArea", [draft?.functionalArea ?? ""])
 
-  async function loadCandidateAndNotes(search = noteSearch) {
+  async function loadCandidateAndNotes(search = noteSearch, includeCandidate = true) {
     if (!candidateId) return
 
     try {
       setLoading(true)
-      const foundCandidate = await getCandidate(candidateId)
-      if (!foundCandidate) {
-        toast.error("Candidate not found")
-        navigate("/")
-        return
-      }
+      if (includeCandidate) {
+        const foundCandidate = await getCandidate(candidateId)
+        if (!foundCandidate) {
+          toast.error("Candidate not found")
+          navigate("/")
+          return
+        }
 
-      setCandidate(foundCandidate)
-      setDraft(foundCandidate)
+        setCandidate(foundCandidate)
+        setDraft(foundCandidate)
+      }
 
       const foundNotes = await listNotes(candidateId, search)
       setNotes(foundNotes)
@@ -137,30 +150,42 @@ export default function CandidateDetailsPage() {
   useEffect(() => {
     if (!candidateId) return
     const timer = setTimeout(() => {
-      void loadCandidateAndNotes(noteSearch)
+      void loadCandidateAndNotes(noteSearch, false)
     }, 250)
 
     return () => clearTimeout(timer)
   }, [noteSearch])
 
-  async function saveCandidate() {
-    if (!candidateId || !draft) return
-
-    try {
-      const updated = await updateCandidate(candidateId, draft)
-      if (!updated) {
-        toast.error("Could not update candidate")
-        return
-      }
-
-      setCandidate(updated)
-      setDraft(updated)
-      setIsEditing(false)
-      toast.success("Candidate updated")
-    } catch {
-      toast.error("Failed to save candidate")
+  useEffect(() => {
+    if (!candidateId || !draft || !candidate || areCandidatesEqual(draft, candidate)) {
+      return
     }
-  }
+
+    const timer = setTimeout(async () => {
+      const requestId = latestSaveRequestId.current + 1
+      latestSaveRequestId.current = requestId
+      setSaveState("saving")
+      try {
+        const updated = await updateCandidate(candidateId, draft)
+        if (requestId !== latestSaveRequestId.current) return
+        if (!updated) {
+          setSaveState("error")
+          toast.error("Could not auto-save candidate")
+          return
+        }
+
+        setCandidate(updated)
+        setDraft(updated)
+        setSaveState("saved")
+      } catch {
+        if (requestId !== latestSaveRequestId.current) return
+        setSaveState("error")
+        toast.error("Failed to auto-save candidate")
+      }
+    }, 600)
+
+    return () => clearTimeout(timer)
+  }, [candidateId, draft, candidate])
 
   async function addNote() {
     if (!candidateId) return
@@ -169,7 +194,7 @@ export default function CandidateDetailsPage() {
       setNewNoteTitle("")
       setNewNoteDescription("")
       setShowDialog(false)
-      await loadCandidateAndNotes()
+      await loadCandidateAndNotes(noteSearch, false)
       toast.success("Note added")
     } catch (error) {
       const message = error instanceof Error && error.message ? error.message : "Unable to add note"
@@ -192,16 +217,12 @@ export default function CandidateDetailsPage() {
             <div className="text-sm text-muted-foreground">Global ID: {candidate.globalId || "-"}</div>
           </div>
           <div className="flex items-center gap-2">
-            {isEditing ? (
-              <>
-                <Button variant="outline" onClick={() => setIsEditing(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={() => void saveCandidate()}>Save</Button>
-              </>
-            ) : (
-              <Button onClick={() => setIsEditing(true)}>Edit</Button>
-            )}
+            <span className="text-xs text-muted-foreground">
+              {saveState === "saving" && "Auto-saving..."}
+              {saveState === "saved" && "All changes saved"}
+              {saveState === "error" && "Auto-save failed"}
+              {saveState === "idle" && "Auto-save enabled"}
+            </span>
             <Button variant="outline" asChild>
               <Link to="/">Back</Link>
             </Button>
@@ -220,19 +241,16 @@ export default function CandidateDetailsPage() {
                   <DetailField
                     label="First Name"
                     value={draft.firstName}
-                    editable={isEditing}
                     onChange={(value) => setDraft((prev) => (prev ? { ...prev, firstName: value } : prev))}
                   />
                   <DetailField
                     label="Last Name"
                     value={draft.lastName}
-                    editable={isEditing}
                     onChange={(value) => setDraft((prev) => (prev ? { ...prev, lastName: value } : prev))}
                   />
                   <DetailField
                     label="Global ID"
                     value={draft.globalId}
-                    editable={isEditing}
                     onChange={(value) => setDraft((prev) => (prev ? { ...prev, globalId: value } : prev))}
                   />
                 </div>
@@ -244,19 +262,16 @@ export default function CandidateDetailsPage() {
                   <DetailField
                     label="Country"
                     value={draft.country}
-                    editable={isEditing}
                     onChange={(value) => setDraft((prev) => (prev ? { ...prev, country: value } : prev))}
                   />
                   <DetailField
                     label="Legal Entity"
                     value={draft.legalEntity}
-                    editable={isEditing}
                     onChange={(value) => setDraft((prev) => (prev ? { ...prev, legalEntity: value } : prev))}
                   />
                   <DetailField
                     label="Organizational Unit"
                     value={draft.organizationalUnit}
-                    editable={isEditing}
                     onChange={(value) => setDraft((prev) => (prev ? { ...prev, organizationalUnit: value } : prev))}
                   />
                 </div>
@@ -268,71 +283,56 @@ export default function CandidateDetailsPage() {
                   <DetailField
                     label="Career Path"
                     value={draft.careerPath}
-                    editable={isEditing}
                     onChange={(value) => setDraft((prev) => (prev ? { ...prev, careerPath: value } : prev))}
                   />
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">Potential Area</Label>
-                    {isEditing ? (
-                      <>
-                        <Input
-                          list="potential-area-options"
-                          value={draft.functionalArea}
-                          onChange={(event) =>
-                            setDraft((prev) => (prev ? { ...prev, functionalArea: event.target.value } : prev))
-                          }
-                        />
-                        <datalist id="potential-area-options">
-                          {potentialAreaOptions.map((option) => (
-                            <option key={option} value={option} />
-                          ))}
-                        </datalist>
-                      </>
-                    ) : (
-                      <div className="min-h-9 rounded-md border px-3 py-2 text-sm">{candidate.functionalArea || "-"}</div>
-                    )}
+                    <>
+                      <Input
+                        list="potential-area-options"
+                        value={draft.functionalArea}
+                        onChange={(event) =>
+                          setDraft((prev) => (prev ? { ...prev, functionalArea: event.target.value } : prev))
+                        }
+                      />
+                      <datalist id="potential-area-options">
+                        {potentialAreaOptions.map((option) => (
+                          <option key={option} value={option} />
+                        ))}
+                      </datalist>
+                    </>
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">Readiness Level (Development Pool)</Label>
-                    {isEditing ? (
-                      <>
-                        <Input
-                          list="development-pool-options"
-                          value={draft.developmentPool}
-                          onChange={(event) =>
-                            setDraft((prev) => (prev ? { ...prev, developmentPool: event.target.value } : prev))
-                          }
-                        />
-                        <datalist id="development-pool-options">
-                          {developmentPoolOptions.map((option) => (
-                            <option key={option} value={option} />
-                          ))}
-                        </datalist>
-                      </>
-                    ) : (
-                      <div className="min-h-9 rounded-md border px-3 py-2 text-sm">{candidate.developmentPool || "-"}</div>
-                    )}
+                    <>
+                      <Input
+                        list="development-pool-options"
+                        value={draft.developmentPool}
+                        onChange={(event) =>
+                          setDraft((prev) => (prev ? { ...prev, developmentPool: event.target.value } : prev))
+                        }
+                      />
+                      <datalist id="development-pool-options">
+                        {developmentPoolOptions.map((option) => (
+                          <option key={option} value={option} />
+                        ))}
+                      </datalist>
+                    </>
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">Promotion Candidate</Label>
-                    {isEditing ? (
-                      <select
-                        className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                        value={draft.promotionCandidate ? "yes" : "no"}
-                        onChange={(event) =>
-                          setDraft((prev) =>
-                            prev ? { ...prev, promotionCandidate: event.target.value === "yes" } : prev
-                          )
-                        }
-                      >
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
-                    ) : (
-                      <div className="min-h-9 rounded-md border px-3 py-2 text-sm">
-                        {candidate.promotionCandidate ? "Yes" : "No"}
-                      </div>
-                    )}
+                    <select
+                      className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                      value={draft.promotionCandidate ? "yes" : "no"}
+                      onChange={(event) =>
+                        setDraft((prev) =>
+                          prev ? { ...prev, promotionCandidate: event.target.value === "yes" } : prev
+                        )
+                      }
+                    >
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
                   </div>
                 </div>
               </div>
