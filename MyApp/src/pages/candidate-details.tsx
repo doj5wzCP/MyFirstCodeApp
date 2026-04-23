@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -34,6 +35,58 @@ function DetailField({
   )
 }
 
+function toDayKey(value: string) {
+  const date = new Date(value)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function formatTimelineDayLabel(value: string) {
+  const date = new Date(value)
+  const today = new Date()
+  const yesterday = new Date()
+  yesterday.setDate(today.getDate() - 1)
+
+  if (toDayKey(date.toISOString()) === toDayKey(today.toISOString())) {
+    return "Today"
+  }
+
+  if (toDayKey(date.toISOString()) === toDayKey(yesterday.toISOString())) {
+    return "Yesterday"
+  }
+
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })
+}
+
+function groupNotesByDay(items: CandidateNote[]) {
+  const groups = new Map<string, CandidateNote[]>()
+
+  for (const note of items) {
+    const key = toDayKey(note.createdOn)
+    const existing = groups.get(key)
+    if (existing) {
+      existing.push(note)
+    } else {
+      groups.set(key, [note])
+    }
+  }
+
+  return [...groups.entries()]
+    .sort(([left], [right]) => (left < right ? 1 : -1))
+    .map(([dayKey, dayNotes]) => ({
+      dayKey,
+      dayLabel: formatTimelineDayLabel(dayNotes[0].createdOn),
+      notes: dayNotes,
+    }))
+}
+
 export default function CandidateDetailsPage() {
   const { candidateId } = useParams<{ candidateId: string }>()
   const navigate = useNavigate()
@@ -46,6 +99,8 @@ export default function CandidateDetailsPage() {
   const [newNoteTitle, setNewNoteTitle] = useState("")
   const [newNoteDescription, setNewNoteDescription] = useState("")
   const [loading, setLoading] = useState(true)
+
+  const groupedNotes = groupNotesByDay(notes)
 
   const developmentPoolOptions = mergeCatalogWithObserved("developmentPool", [draft?.developmentPool ?? ""])
   const potentialAreaOptions = mergeCatalogWithObserved("functionalArea", [draft?.functionalArea ?? ""])
@@ -153,169 +208,200 @@ export default function CandidateDetailsPage() {
           </div>
         </div>
 
-        <Card className="border shadow-none">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Candidate Details</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div>
-              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Identity</h2>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <DetailField
-                  label="First Name"
-                  value={draft.firstName}
-                  editable={isEditing}
-                  onChange={(value) => setDraft((prev) => (prev ? { ...prev, firstName: value } : prev))}
-                />
-                <DetailField
-                  label="Last Name"
-                  value={draft.lastName}
-                  editable={isEditing}
-                  onChange={(value) => setDraft((prev) => (prev ? { ...prev, lastName: value } : prev))}
-                />
-                <DetailField
-                  label="Global ID"
-                  value={draft.globalId}
-                  editable={isEditing}
-                  onChange={(value) => setDraft((prev) => (prev ? { ...prev, globalId: value } : prev))}
-                />
-              </div>
-            </div>
-
-            <div>
-              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Organization</h2>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <DetailField
-                  label="Country"
-                  value={draft.country}
-                  editable={isEditing}
-                  onChange={(value) => setDraft((prev) => (prev ? { ...prev, country: value } : prev))}
-                />
-                <DetailField
-                  label="Legal Entity"
-                  value={draft.legalEntity}
-                  editable={isEditing}
-                  onChange={(value) => setDraft((prev) => (prev ? { ...prev, legalEntity: value } : prev))}
-                />
-                <DetailField
-                  label="Organizational Unit"
-                  value={draft.organizationalUnit}
-                  editable={isEditing}
-                  onChange={(value) => setDraft((prev) => (prev ? { ...prev, organizationalUnit: value } : prev))}
-                />
-              </div>
-            </div>
-
-            <div>
-              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Talent Information</h2>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <DetailField
-                  label="Career Path"
-                  value={draft.careerPath}
-                  editable={isEditing}
-                  onChange={(value) => setDraft((prev) => (prev ? { ...prev, careerPath: value } : prev))}
-                />
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Potential Area</Label>
-                  {isEditing ? (
-                    <>
-                      <Input
-                        list="potential-area-options"
-                        value={draft.functionalArea}
-                        onChange={(event) =>
-                          setDraft((prev) => (prev ? { ...prev, functionalArea: event.target.value } : prev))
-                        }
-                      />
-                      <datalist id="potential-area-options">
-                        {potentialAreaOptions.map((option) => (
-                          <option key={option} value={option} />
-                        ))}
-                      </datalist>
-                    </>
-                  ) : (
-                    <div className="min-h-9 rounded-md border px-3 py-2 text-sm">{candidate.functionalArea || "-"}</div>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Readiness Level (Development Pool)</Label>
-                  {isEditing ? (
-                    <>
-                      <Input
-                        list="development-pool-options"
-                        value={draft.developmentPool}
-                        onChange={(event) =>
-                          setDraft((prev) => (prev ? { ...prev, developmentPool: event.target.value } : prev))
-                        }
-                      />
-                      <datalist id="development-pool-options">
-                        {developmentPoolOptions.map((option) => (
-                          <option key={option} value={option} />
-                        ))}
-                      </datalist>
-                    </>
-                  ) : (
-                    <div className="min-h-9 rounded-md border px-3 py-2 text-sm">{candidate.developmentPool || "-"}</div>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Promotion Candidate</Label>
-                  {isEditing ? (
-                    <select
-                      className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                      value={draft.promotionCandidate ? "yes" : "no"}
-                      onChange={(event) =>
-                        setDraft((prev) =>
-                          prev ? { ...prev, promotionCandidate: event.target.value === "yes" } : prev
-                        )
-                      }
-                    >
-                      <option value="yes">Yes</option>
-                      <option value="no">No</option>
-                    </select>
-                  ) : (
-                    <div className="min-h-9 rounded-md border px-3 py-2 text-sm">
-                      {candidate.promotionCandidate ? "Yes" : "No"}
-                    </div>
-                  )}
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+          <Card className="border shadow-none">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Candidate Details</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Identity</h2>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <DetailField
+                    label="First Name"
+                    value={draft.firstName}
+                    editable={isEditing}
+                    onChange={(value) => setDraft((prev) => (prev ? { ...prev, firstName: value } : prev))}
+                  />
+                  <DetailField
+                    label="Last Name"
+                    value={draft.lastName}
+                    editable={isEditing}
+                    onChange={(value) => setDraft((prev) => (prev ? { ...prev, lastName: value } : prev))}
+                  />
+                  <DetailField
+                    label="Global ID"
+                    value={draft.globalId}
+                    editable={isEditing}
+                    onChange={(value) => setDraft((prev) => (prev ? { ...prev, globalId: value } : prev))}
+                  />
                 </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
 
-        <Card className="border shadow-none">
-          <CardHeader className="pb-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <CardTitle className="text-base">Notes</CardTitle>
-              <div className="flex items-center gap-2">
-                <Input
-                  className="w-64"
-                  placeholder="Search notes"
-                  value={noteSearch}
-                  onChange={(event) => setNoteSearch(event.target.value)}
-                />
-                <Button onClick={() => setShowDialog(true)}>Add Note</Button>
+              <div>
+                <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Organization</h2>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <DetailField
+                    label="Country"
+                    value={draft.country}
+                    editable={isEditing}
+                    onChange={(value) => setDraft((prev) => (prev ? { ...prev, country: value } : prev))}
+                  />
+                  <DetailField
+                    label="Legal Entity"
+                    value={draft.legalEntity}
+                    editable={isEditing}
+                    onChange={(value) => setDraft((prev) => (prev ? { ...prev, legalEntity: value } : prev))}
+                  />
+                  <DetailField
+                    label="Organizational Unit"
+                    value={draft.organizationalUnit}
+                    editable={isEditing}
+                    onChange={(value) => setDraft((prev) => (prev ? { ...prev, organizationalUnit: value } : prev))}
+                  />
+                </div>
               </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {notes.length === 0 ? (
-              <div className="text-sm text-muted-foreground">No notes found.</div>
-            ) : (
-              notes.map((note) => (
-                <div key={note.id} className="rounded-md border p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="font-medium">{note.title}</h3>
-                    <div className="text-xs text-muted-foreground">
-                      {new Date(note.createdOn).toLocaleString()} by {note.createdBy}
-                    </div>
+
+              <div>
+                <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Talent Information</h2>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <DetailField
+                    label="Career Path"
+                    value={draft.careerPath}
+                    editable={isEditing}
+                    onChange={(value) => setDraft((prev) => (prev ? { ...prev, careerPath: value } : prev))}
+                  />
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Potential Area</Label>
+                    {isEditing ? (
+                      <>
+                        <Input
+                          list="potential-area-options"
+                          value={draft.functionalArea}
+                          onChange={(event) =>
+                            setDraft((prev) => (prev ? { ...prev, functionalArea: event.target.value } : prev))
+                          }
+                        />
+                        <datalist id="potential-area-options">
+                          {potentialAreaOptions.map((option) => (
+                            <option key={option} value={option} />
+                          ))}
+                        </datalist>
+                      </>
+                    ) : (
+                      <div className="min-h-9 rounded-md border px-3 py-2 text-sm">{candidate.functionalArea || "-"}</div>
+                    )}
                   </div>
-                  <p className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap">{note.description}</p>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Readiness Level (Development Pool)</Label>
+                    {isEditing ? (
+                      <>
+                        <Input
+                          list="development-pool-options"
+                          value={draft.developmentPool}
+                          onChange={(event) =>
+                            setDraft((prev) => (prev ? { ...prev, developmentPool: event.target.value } : prev))
+                          }
+                        />
+                        <datalist id="development-pool-options">
+                          {developmentPoolOptions.map((option) => (
+                            <option key={option} value={option} />
+                          ))}
+                        </datalist>
+                      </>
+                    ) : (
+                      <div className="min-h-9 rounded-md border px-3 py-2 text-sm">{candidate.developmentPool || "-"}</div>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Promotion Candidate</Label>
+                    {isEditing ? (
+                      <select
+                        className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                        value={draft.promotionCandidate ? "yes" : "no"}
+                        onChange={(event) =>
+                          setDraft((prev) =>
+                            prev ? { ...prev, promotionCandidate: event.target.value === "yes" } : prev
+                          )
+                        }
+                      >
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    ) : (
+                      <div className="min-h-9 rounded-md border px-3 py-2 text-sm">
+                        {candidate.promotionCandidate ? "Yes" : "No"}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border shadow-none">
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle className="text-base">Notes Timeline</CardTitle>
+                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+                  <Input
+                    className="w-full sm:w-56"
+                    placeholder="Search notes"
+                    value={noteSearch}
+                    onChange={(event) => setNoteSearch(event.target.value)}
+                  />
+                  <Button className="sm:shrink-0" onClick={() => setShowDialog(true)}>
+                    Add Note
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {notes.length === 0 ? (
+                <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">No notes found.</div>
+              ) : (
+                groupedNotes.map((group) => (
+                  <section key={group.dayKey} className="space-y-3">
+                    <Badge variant="secondary" className="rounded-sm px-2 py-1 text-[11px] font-semibold tracking-wide">
+                      {group.dayLabel}
+                    </Badge>
+                    <div className="space-y-3">
+                      {group.notes.map((note, index) => (
+                        <div key={note.id} className="relative pl-6">
+                          {index < group.notes.length - 1 && (
+                            <span className="absolute left-[9px] top-7 h-[calc(100%-12px)] w-px bg-border" aria-hidden="true" />
+                          )}
+                          <span
+                            className="absolute left-0 top-1.5 h-[18px] w-[18px] rounded-full border border-primary/45 bg-background shadow-sm"
+                            aria-hidden="true"
+                          >
+                            <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary" />
+                          </span>
+
+                          <div className="rounded-md border bg-card p-3">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <h3 className="text-sm font-semibold text-foreground">{note.title || "Note"}</h3>
+                              <Badge variant="outline" className="rounded-sm text-[11px] font-normal text-muted-foreground">
+                                {new Date(note.createdOn).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </Badge>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">{note.createdBy || "System"}</p>
+                            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+                              {note.description}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
