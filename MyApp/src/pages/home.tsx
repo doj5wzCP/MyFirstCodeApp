@@ -400,11 +400,11 @@ export default function HomePage() {
           </Card>
         )}
 
-        <Card className="border shadow-none">
-          <CardHeader className="pb-0">
+        <Card className="border shadow-none gap-1 py-2">
+          <CardHeader className="gap-1 pb-0 pt-0">
             <CardTitle className="text-base">Filters</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 pt-0">
+          <CardContent className="space-y-2 pt-0 pb-0">
             <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               <MultiValueFilter
                 label="Country"
@@ -473,11 +473,11 @@ export default function HomePage() {
         </Card>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <Card className="border shadow-none">
-            <CardHeader className="pb-1">
+          <Card className="border shadow-none gap-1 py-2">
+            <CardHeader className="gap-1 pb-0 pt-0">
               <CardTitle className="text-base">Promotion Candidates</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-1 pt-1 pb-0">
+            <CardContent className="space-y-1 pt-0.5 pb-0">
               <div className="flex items-center justify-between text-[11px] leading-none text-muted-foreground">
                 <div className="font-medium text-foreground">
                   {promotionSummary[0].value} / {candidates.length}
@@ -504,11 +504,11 @@ export default function HomePage() {
             </CardContent>
           </Card>
 
-          <Card className="border shadow-none">
-            <CardHeader className="pb-1">
+          <Card className="border shadow-none gap-1 py-2">
+            <CardHeader className="gap-1 pb-0 pt-0">
               <CardTitle className="text-base">Candidates by Gender</CardTitle>
             </CardHeader>
-            <CardContent className="pt-1 pb-0">
+            <CardContent className="pt-0.5 pb-0">
               <ChartContainer className="h-[122px] w-full !aspect-auto" config={groupChartConfig}>
                 <BarChart data={genderSummary} margin={{ left: 0, right: 6, top: 0, bottom: -6 }} barCategoryGap={12}>
                   <CartesianGrid vertical={false} />
@@ -521,11 +521,11 @@ export default function HomePage() {
             </CardContent>
           </Card>
 
-          <Card className="border shadow-none">
-            <CardHeader className="pb-1">
+          <Card className="border shadow-none gap-1 py-2">
+            <CardHeader className="gap-1 pb-0 pt-0">
               <CardTitle className="text-base">Candidates by Country</CardTitle>
             </CardHeader>
-            <CardContent className="pt-1 pb-0">
+            <CardContent className="pt-0.5 pb-0">
               <ChartContainer className="h-[122px] w-full !aspect-auto" config={groupChartConfig}>
                 <BarChart data={countrySummary} layout="vertical" margin={{ left: 2, right: 6, top: 0, bottom: -6 }} barCategoryGap={8}>
                   <CartesianGrid horizontal={false} />
