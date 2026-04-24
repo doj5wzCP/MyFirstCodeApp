@@ -13,12 +13,23 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import { emptyFilters } from "@/lib/talent-types"
 import type { CandidateFilters, CandidateProfile } from "@/lib/talent-types"
 import { getDataConnectionStatus, getDataverseDiagnostics, listCandidates } from "@/lib/talent-data"
+import { Bar, BarChart, CartesianGrid, Pie, PieChart, XAxis, YAxis } from "recharts"
 import { toast } from "sonner"
 
 const BUILD_STAMP = "2026-04-16.24"
+
+const promotionChartConfig = {
+  promoted: { label: "Promotion Candidate", color: "#16a34a" },
+  notPromoted: { label: "Not Marked", color: "#94a3b8" },
+} satisfies ChartConfig
+
+const groupChartConfig = {
+  count: { label: "Candidates", color: "#2563eb" },
+} satisfies ChartConfig
 
 type CandidateOverviewField =
   | "firstName"
@@ -60,6 +71,8 @@ type MultiValueFilterKey =
   | "careerPath"
   | "functionalArea"
   | "developmentPool"
+
+type SortDirection = "asc" | "desc"
 
 function MultiValueFilter({
   label,
@@ -130,6 +143,8 @@ export default function HomePage() {
   const [diagnostics, setDiagnostics] = useState(getDataverseDiagnostics())
   const [showDiagnostics, setShowDiagnostics] = useState(false)
   const [visibleFields, setVisibleFields] = useState<CandidateOverviewField[]>(DEFAULT_VISIBLE_FIELDS)
+  const [sortField, setSortField] = useState<CandidateOverviewField>("lastName")
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc")
 
   async function loadData(options?: { showToast?: boolean; showDiagnostics?: boolean }) {
     const showToast = options?.showToast ?? false
@@ -177,8 +192,19 @@ export default function HomePage() {
     [allCandidates]
   )
 
+  function compareCandidateValues(left: CandidateProfile, right: CandidateProfile, field: CandidateOverviewField) {
+    if (field === "promotionCandidate") {
+      return Number(left.promotionCandidate) - Number(right.promotionCandidate)
+    }
+
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
+    const leftValue = String(left[field] ?? "").trim()
+    const rightValue = String(right[field] ?? "").trim()
+    return collator.compare(leftValue, rightValue)
+  }
+
   const candidates = useMemo(() => {
-    return allCandidates.filter((candidate) => {
+    const filteredCandidates = allCandidates.filter((candidate) => {
       if (filters.country.length > 0 && !filters.country.includes(candidate.country)) return false
       if (filters.legalEntity.length > 0 && !filters.legalEntity.includes(candidate.legalEntity)) return false
       if (filters.organizationalUnit.length > 0 && !filters.organizationalUnit.includes(candidate.organizationalUnit)) {
@@ -198,6 +224,21 @@ export default function HomePage() {
       }
       return true
     })
+
+    return [...filteredCandidates].sort((left, right) => {
+      const primaryResult = compareCandidateValues(left, right, sortField)
+      if (primaryResult !== 0) {
+        return sortDirection === "asc" ? primaryResult : -primaryResult
+      }
+
+      const lastNameResult = compareCandidateValues(left, right, "lastName")
+      if (lastNameResult !== 0) return lastNameResult
+
+      const firstNameResult = compareCandidateValues(left, right, "firstName")
+      if (firstNameResult !== 0) return firstNameResult
+
+      return compareCandidateValues(left, right, "globalId")
+    })
   }, [
     allCandidates,
     filters.country,
@@ -208,7 +249,52 @@ export default function HomePage() {
     filters.developmentPool,
     filters.onlyPromotionCandidates,
     filters.searchText,
+    sortDirection,
+    sortField,
   ])
+
+  function normalizeChartBucket(value?: string): string {
+    return value && value.trim() ? value.trim() : "Unspecified"
+  }
+
+  const promotionSummary = useMemo(() => {
+    const promotedCount = candidates.filter((candidate) => candidate.promotionCandidate).length
+    const notPromotedCount = Math.max(candidates.length - promotedCount, 0)
+    return [
+      { key: "promoted", label: "Promotion Candidate", value: promotedCount, fill: "var(--color-promoted)" },
+      { key: "notPromoted", label: "Not Marked", value: notPromotedCount, fill: "var(--color-notPromoted)" },
+    ]
+  }, [candidates])
+
+  const genderSummary = useMemo(() => {
+    const counts = new Map<string, number>()
+    candidates.forEach((candidate) => {
+      const key = normalizeChartBucket(candidate.gender)
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    })
+
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((left, right) => right.count - left.count)
+  }, [candidates])
+
+  const countrySummary = useMemo(() => {
+    const counts = new Map<string, number>()
+    candidates.forEach((candidate) => {
+      const key = normalizeChartBucket(candidate.country)
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    })
+
+    const sorted = [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((left, right) => right.count - left.count)
+
+    if (sorted.length <= 8) return sorted
+
+    const top = sorted.slice(0, 7)
+    const othersCount = sorted.slice(7).reduce((sum, row) => sum + row.count, 0)
+    return [...top, { name: "Other", count: othersCount }]
+  }, [candidates])
 
   function setMultiFilter(field: MultiValueFilterKey, nextValues: string[]) {
     setFilters((prev: CandidateFilters) => ({ ...prev, [field]: nextValues }))
@@ -232,6 +318,16 @@ export default function HomePage() {
 
       return next
     })
+  }
+
+  function toggleSortByField(field: CandidateOverviewField) {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))
+      return
+    }
+
+    setSortField(field)
+    setSortDirection("asc")
   }
 
   function renderCandidateCell(candidate: CandidateProfile, field: CandidateOverviewField) {
@@ -305,11 +401,11 @@ export default function HomePage() {
         )}
 
         <Card className="border shadow-none">
-          <CardHeader className="pb-3">
+          <CardHeader className="pb-0">
             <CardTitle className="text-base">Filters</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <CardContent className="space-y-2 pt-0">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               <MultiValueFilter
                 label="Country"
                 options={countries}
@@ -353,7 +449,7 @@ export default function HomePage() {
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-4">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="promotion-only"
@@ -376,9 +472,83 @@ export default function HomePage() {
           </CardContent>
         </Card>
 
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <Card className="border shadow-none">
+            <CardHeader className="pb-1">
+              <CardTitle className="text-base">Promotion Candidates</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 pt-1 pb-3">
+              <div className="flex items-center justify-between text-[11px] leading-none text-muted-foreground">
+                <div className="font-medium text-foreground">
+                  {promotionSummary[0].value} / {candidates.length}
+                </div>
+                <div>
+                  {candidates.length === 0 ? "0%" : `${Math.round((promotionSummary[0].value / candidates.length) * 100)}%`}
+                </div>
+              </div>
+              <ChartContainer className="h-[122px] w-full !aspect-auto" config={promotionChartConfig}>
+                <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                  <Pie
+                    data={promotionSummary}
+                    dataKey="value"
+                    nameKey="label"
+                    innerRadius={32}
+                    outerRadius={50}
+                    cx="50%"
+                    cy="53%"
+                    strokeWidth={2}
+                  />
+                  <ChartTooltip content={<ChartTooltipContent hideLabel />} />
+                </PieChart>
+              </ChartContainer>
+            </CardContent>
+          </Card>
+
+          <Card className="border shadow-none">
+            <CardHeader className="pb-1">
+              <CardTitle className="text-base">Candidates by Gender</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-1 pb-3">
+              <ChartContainer className="h-[122px] w-full !aspect-auto" config={groupChartConfig}>
+                <BarChart data={genderSummary} margin={{ left: 0, right: 6, top: 0, bottom: 0 }} barCategoryGap={12}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} tick={{ fontSize: 10 }} />
+                  <YAxis allowDecimals={false} width={28} tickLine={false} axisLine={false} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Bar dataKey="count" fill="var(--color-count)" radius={[3, 3, 0, 0]} maxBarSize={28} />
+                </BarChart>
+              </ChartContainer>
+            </CardContent>
+          </Card>
+
+          <Card className="border shadow-none">
+            <CardHeader className="pb-1">
+              <CardTitle className="text-base">Candidates by Country</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-1 pb-3">
+              <ChartContainer className="h-[122px] w-full !aspect-auto" config={groupChartConfig}>
+                <BarChart data={countrySummary} layout="vertical" margin={{ left: 2, right: 6, top: 0, bottom: 0 }} barCategoryGap={8}>
+                  <CartesianGrid horizontal={false} />
+                  <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    tickLine={false}
+                    axisLine={false}
+                    width={76}
+                    tick={{ fontSize: 10 }}
+                  />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Bar dataKey="count" fill="var(--color-count)" radius={[0, 3, 3, 0]} maxBarSize={18} />
+                </BarChart>
+              </ChartContainer>
+            </CardContent>
+          </Card>
+        </div>
+
         <Card className="border shadow-none flex-1 min-h-0">
           <CardHeader className="pb-2">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <CardTitle className="text-base">Candidates</CardTitle>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -406,7 +576,18 @@ export default function HomePage() {
               style={{ gridTemplateColumns: columnTemplate }}
             >
               {selectedFieldDefinitions.map((field) => (
-                <div key={field.key}>{field.label}</div>
+                <button
+                  key={field.key}
+                  type="button"
+                  className="flex items-center gap-1 text-left transition-colors hover:text-foreground"
+                  onClick={() => toggleSortByField(field.key)}
+                  aria-label={`Sort by ${field.label}`}
+                >
+                  <span>{field.label}</span>
+                  <span aria-hidden>
+                    {sortField === field.key ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                  </span>
+                </button>
               ))}
               <div className="text-right">Action</div>
             </div>

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -24,6 +24,8 @@ const CONFLICT_FIELDS: Array<{ key: keyof CandidateProfile; label: string }> = [
   { key: "developmentPool", label: "Development Pool" },
   { key: "promotionCandidate", label: "Self Nomination" },
 ]
+
+const AUTO_ACCEPT_FIELDS: Array<keyof CandidateProfile> = ["firstName", "lastName"]
 
 type ExtendedCandidate = Partial<CandidateProfile> & {
   userSystemId?: string
@@ -51,6 +53,7 @@ type ExtendedCandidate = Partial<CandidateProfile> & {
 }
 
 export default function ExcelUploadPage() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadedRows, setUploadedRows] = useState<UploadedRow[]>([])
   const [preview, setPreview] = useState<UploadedRow[]>([])
@@ -79,6 +82,10 @@ export default function ExcelUploadPage() {
     return CONFLICT_FIELDS
       .filter(({ key }) => uploaded[key] !== undefined && valuesDiffer(existing[key], uploaded[key] as CandidateProfile[keyof CandidateProfile]))
       .map(({ key }) => key)
+  }
+
+  function isAutoAcceptedField(field: keyof CandidateProfile): boolean {
+    return AUTO_ACCEPT_FIELDS.includes(field)
   }
 
   function formatFieldValue(value: CandidateProfile[keyof CandidateProfile] | undefined): string {
@@ -363,7 +370,7 @@ export default function ExcelUploadPage() {
           const updates: Partial<CandidateProfile> = {}
           const changedFields = getChangedFields(existing, uploaded)
           changedFields.forEach((field) => {
-            const decision = conflictDecisions[i]?.[field] ?? "uploaded"
+            const decision = isAutoAcceptedField(field) ? "uploaded" : (conflictDecisions[i]?.[field] ?? "uploaded")
             if (decision === "uploaded") {
               if (field === "firstName" && uploaded.firstName !== undefined) updates.firstName = uploaded.firstName
               if (field === "lastName" && uploaded.lastName !== undefined) updates.lastName = uploaded.lastName
@@ -438,13 +445,25 @@ export default function ExcelUploadPage() {
                 </Label>
                 <div className="flex items-center gap-2">
                   <Input
+                    ref={fileInputRef}
                     id="file-input"
                     type="file"
                     accept=".csv,.xlsx,.xls"
                     onChange={handleFileSelect}
                     disabled={loading}
-                    className="cursor-pointer"
+                    className="sr-only"
                   />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={loading}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Choose file
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    {selectedFile ? selectedFile.name : "No file selected"}
+                  </span>
                 </div>
                 <p className="text-xs text-muted-foreground">Supports: CSV, Excel (.xlsx, .xls)</p>
               </div>
@@ -622,13 +641,16 @@ export default function ExcelUploadPage() {
               <DialogDescription>
                 Select which records to create or update. Unselected records will be skipped.
               </DialogDescription>
+              <div className="text-xs text-muted-foreground">
+                First Name and Last Name changes are auto-accepted from the uploaded file (no manual validation required).
+              </div>
             </DialogHeader>
 
-            <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
+            <div className="min-h-0 space-y-4 overflow-y-scroll pr-2 [scrollbar-gutter:stable]">
             {/* New Records */}
             {importReview && importReview.newRecords.length > 0 && (
               <div>
-                <div className="flex items-center gap-2 mb-2">
+                <div className="sticky top-0 z-10 -mx-1 mb-2 flex items-center gap-2 border-b bg-background/95 px-1 py-2 backdrop-blur">
                   <Checkbox
                     id="select-all-new"
                     checked={selectedNewRecords.size === importReview.newRecords.length}
@@ -646,7 +668,7 @@ export default function ExcelUploadPage() {
                     Create New Records ({importReview.newRecords.length})
                   </label>
                 </div>
-                <div className="space-y-2 pl-6 text-xs">
+                <div className="max-h-72 space-y-2 overflow-y-auto rounded-md border bg-muted/20 p-2 pl-4 pr-2 text-xs [scrollbar-gutter:stable]">
                   {importReview.newRecords.map((record, idx) => (
                     <div key={idx} className="flex items-center gap-2">
                       <Checkbox
@@ -674,7 +696,7 @@ export default function ExcelUploadPage() {
             {/* Changed Records */}
             {importReview && importReview.changedRecords.length > 0 && (
               <div>
-                <div className="flex items-center gap-2 mb-2">
+                <div className="sticky top-0 z-10 -mx-1 mb-2 flex items-center gap-2 border-b bg-background/95 px-1 py-2 backdrop-blur">
                   <Checkbox
                     id="select-all-changed"
                     checked={selectedChangedRecords.size === importReview.changedRecords.length}
@@ -692,7 +714,10 @@ export default function ExcelUploadPage() {
                     Update Changed Records ({importReview.changedRecords.length})
                   </label>
                 </div>
-                <div className="space-y-2 pl-6 text-xs">
+                <p className="mb-2 text-[11px] text-muted-foreground">
+                  First Name and Last Name are always overwritten with uploaded values.
+                </p>
+                <div className="max-h-[40vh] space-y-2 overflow-y-auto rounded-md border bg-muted/10 p-2 pl-4 pr-2 text-xs [scrollbar-gutter:stable]">
                   {importReview.changedRecords.map(({ existing, uploaded }, idx) => {
                     const changedFields = getChangedFields(existing, uploaded)
                     return (
@@ -720,11 +745,34 @@ export default function ExcelUploadPage() {
                           {changedFields.map((field) => {
                             const fieldLabel = CONFLICT_FIELDS.find((f) => f.key === field)?.label ?? String(field)
                             const decision = conflictDecisions[idx]?.[field] ?? "uploaded"
+                            const autoAccepted = isAutoAcceptedField(field)
                             return (
                               <div key={`${idx}-${String(field)}`} className="rounded border bg-white p-2">
                                 <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                                   {fieldLabel}
                                 </div>
+                                {autoAccepted ? (
+                                  <div className="space-y-2">
+                                    <div className="text-[11px] text-blue-700">
+                                      Automatically updated from uploaded file. No validation required.
+                                    </div>
+                                    <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                      <div className="rounded border border-muted px-2 py-1 text-[11px]">
+                                        <div className="font-semibold">Current</div>
+                                        <div className="truncate text-muted-foreground">
+                                          {formatFieldValue(existing[field])}
+                                        </div>
+                                      </div>
+                                      <div className="rounded border border-blue-500 bg-blue-50 px-2 py-1 text-[11px]">
+                                        <div className="font-semibold">Uploaded (Auto Applied)</div>
+                                        <div className="truncate text-muted-foreground">
+                                          {formatFieldValue(uploaded[field])}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <>
                                 {field === "careerPath" && (
                                   <div className="mb-2 text-[11px] text-amber-700">
                                     Displayed for conflict visibility. CSV label value is not written automatically for this OptionSet field.
@@ -767,6 +815,8 @@ export default function ExcelUploadPage() {
                                     </div>
                                   </button>
                                 </div>
+                                  </>
+                                )}
                               </div>
                             )
                           })}

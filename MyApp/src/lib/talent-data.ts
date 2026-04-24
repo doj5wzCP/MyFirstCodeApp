@@ -336,6 +336,11 @@ function mapCandidate(row: Row): CandidateProfile {
     lastName: str(row, "doj5wz_lastname"),
     globalId: str(row, "doj5wz_globalidentifier"),
     country: str(row, "doj5wz_country"),
+    gender: str(
+      row,
+      "doj5wz_gender@OData.Community.Display.V1.FormattedValue",
+      "doj5wz_gender"
+    ),
     legalEntity: str(row, "doj5wz_legalentity"),
     organizationalUnit: str(row, "doj5wz_organizationalunit"),
     // careerpath is an OptionSet — SDK returns label in OData@formattedValue or as string key
@@ -396,6 +401,7 @@ export async function listCandidates(filters: CandidateFilters = emptyFilters): 
     "doj5wz_lastname",
     "doj5wz_globalidentifier",
     "doj5wz_country",
+    "doj5wz_gender",
     "doj5wz_legalentity",
     "doj5wz_organizationalunit",
     "doj5wz_careerpath",
@@ -439,6 +445,7 @@ export async function getCandidate(candidateId: string): Promise<CandidateProfil
     "doj5wz_lastname",
     "doj5wz_globalidentifier",
     "doj5wz_country",
+    "doj5wz_gender",
     "doj5wz_legalentity",
     "doj5wz_organizationalunit",
     "doj5wz_careerpath",

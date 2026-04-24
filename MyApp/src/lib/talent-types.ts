@@ -4,6 +4,7 @@ export type CandidateProfile = {
   lastName: string
   globalId: string
   country: string
+  gender?: string
   legalEntity: string
   organizationalUnit: string
   careerPath: string
