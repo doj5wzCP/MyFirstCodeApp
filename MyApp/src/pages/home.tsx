@@ -477,7 +477,7 @@ export default function HomePage() {
             <CardHeader className="pb-1">
               <CardTitle className="text-base">Promotion Candidates</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-1 pt-1 pb-3">
+            <CardContent className="space-y-1 pt-1 pb-0">
               <div className="flex items-center justify-between text-[11px] leading-none text-muted-foreground">
                 <div className="font-medium text-foreground">
                   {promotionSummary[0].value} / {candidates.length}
@@ -487,7 +487,7 @@ export default function HomePage() {
                 </div>
               </div>
               <ChartContainer className="h-[122px] w-full !aspect-auto" config={promotionChartConfig}>
-                <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                <PieChart margin={{ top: 0, right: 0, bottom: -6, left: 0 }}>
                   <Pie
                     data={promotionSummary}
                     dataKey="value"
@@ -508,9 +508,9 @@ export default function HomePage() {
             <CardHeader className="pb-1">
               <CardTitle className="text-base">Candidates by Gender</CardTitle>
             </CardHeader>
-            <CardContent className="pt-1 pb-3">
+            <CardContent className="pt-1 pb-0">
               <ChartContainer className="h-[122px] w-full !aspect-auto" config={groupChartConfig}>
-                <BarChart data={genderSummary} margin={{ left: 0, right: 6, top: 0, bottom: 0 }} barCategoryGap={12}>
+                <BarChart data={genderSummary} margin={{ left: 0, right: 6, top: 0, bottom: -6 }} barCategoryGap={12}>
                   <CartesianGrid vertical={false} />
                   <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} tick={{ fontSize: 10 }} />
                   <YAxis allowDecimals={false} width={28} tickLine={false} axisLine={false} />
@@ -525,9 +525,9 @@ export default function HomePage() {
             <CardHeader className="pb-1">
               <CardTitle className="text-base">Candidates by Country</CardTitle>
             </CardHeader>
-            <CardContent className="pt-1 pb-3">
+            <CardContent className="pt-1 pb-0">
               <ChartContainer className="h-[122px] w-full !aspect-auto" config={groupChartConfig}>
-                <BarChart data={countrySummary} layout="vertical" margin={{ left: 2, right: 6, top: 0, bottom: 0 }} barCategoryGap={8}>
+                <BarChart data={countrySummary} layout="vertical" margin={{ left: 2, right: 6, top: 0, bottom: -6 }} barCategoryGap={8}>
                   <CartesianGrid horizontal={false} />
                   <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} />
                   <YAxis
